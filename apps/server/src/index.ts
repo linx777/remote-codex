@@ -145,13 +145,23 @@ function jsonResponse(
   statusCode: number,
   body: unknown,
 ): void {
+  const headers = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "content-type",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+  };
+
+  if (statusCode === 204 || statusCode === 304) {
+    res.writeHead(statusCode, headers);
+    res.end();
+    return;
+  }
+
   const encoded = Buffer.from(JSON.stringify(body), "utf8");
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": encoded.length,
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "content-type",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    ...headers,
   });
   res.end(encoded);
 }
