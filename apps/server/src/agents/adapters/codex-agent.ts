@@ -766,12 +766,15 @@ export class CodexAgentAdapter implements AgentAdapter {
         return {
           ownerClientId,
           conversationState: snapshotState,
-          liveStateError: {
-            kind: "parseFailed",
-            message: toErrorMessage(error),
-            eventIndex,
-            patchIndex: null,
-          },
+          liveStateError:
+            snapshotState === null
+              ? {
+                  kind: "parseFailed",
+                  message: toErrorMessage(error),
+                  eventIndex,
+                  patchIndex: null,
+                }
+              : null,
         };
       }
     }
@@ -839,12 +842,15 @@ export class CodexAgentAdapter implements AgentAdapter {
       return {
         ownerClientId,
         conversationState: snapshotState,
-        liveStateError: {
-          kind: "reductionFailed",
-          message,
-          eventIndex,
-          patchIndex,
-        },
+        liveStateError:
+          snapshotState === null
+            ? {
+                kind: "reductionFailed",
+                message,
+                eventIndex,
+                patchIndex,
+              }
+            : null,
       };
     }
   }
