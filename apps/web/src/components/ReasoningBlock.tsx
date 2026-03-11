@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronRight, Loader2 } from "lucide-react";
+import { Brain, ChevronRight, Compass, Lightbulb, Loader2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface ReasoningBlockProps {
@@ -9,63 +9,90 @@ interface ReasoningBlockProps {
   isActive: boolean;
 }
 
-export function ReasoningBlock({
-  summary,
-  text,
-  isActive,
-}: ReasoningBlockProps) {
+function sanitizeLine(line: string): string {
+  return line.replaceAll("**", "").trim();
+}
+
+function inferReasoningTitle(summary: string[], fallback: string): string {
+  const first = summary[0] ?? "";
+  if (summary.length > 1 && first.length > 0 && first.length <= 32) {
+    return first;
+  }
+  return fallback;
+}
+
+function iconForReasoningTitle(title: string) {
+  const normalized = title.trim().toLowerCase();
+  if (normalized.includes("explor")) return Search;
+  if (normalized.includes("plan") || normalized.includes("task")) return Compass;
+  if (normalized.includes("think") || normalized.includes("reason")) return Brain;
+  return Lightbulb;
+}
+
+export function ReasoningBlock({ summary, text, isActive }: ReasoningBlockProps) {
   const [expanded, setExpanded] = useState(false);
-  const sanitizedSummary = summary.map((line) =>
-    line.replaceAll("**", "").trim(),
+  const sanitizedSummary = useMemo(
+    () => summary.map(sanitizeLine).filter((line) => line.length > 0),
+    [summary],
   );
-  const currentLine =
-    sanitizedSummary[sanitizedSummary.length - 1] ?? "Thinking…";
-  const canExpand = sanitizedSummary.length > 1;
+  const fallbackTitle = isActive ? "Thinking" : "Reasoning";
+  const title = inferReasoningTitle(sanitizedSummary, fallbackTitle);
+  const detailLines =
+    sanitizedSummary.length > 1 && title === sanitizedSummary[0]
+      ? sanitizedSummary.slice(1)
+      : sanitizedSummary;
+  const currentDetail = detailLines[detailLines.length - 1] ?? null;
+  const canExpand = detailLines.length > 1 || Boolean(text);
+  const TitleIcon = iconForReasoningTitle(title);
 
   return (
-    <div className="my-4">
+    <div className="my-4 rounded-2xl border border-border/70 bg-card/75 px-4 py-3 shadow-sm">
       <Button
         type="button"
         onClick={() => {
-          if (canExpand) setExpanded((v) => !v);
+          if (canExpand) setExpanded((value) => !value);
         }}
         variant="ghost"
-        className="h-auto w-full justify-start gap-2 p-0 text-left text-sm text-muted-foreground transition-colors hover:bg-transparent hover:text-foreground"
+        className="h-auto w-full justify-start gap-3 p-0 text-left hover:bg-transparent"
       >
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.span
-            key={currentLine}
-            initial={{ opacity: 0, y: -3 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 3 }}
-            transition={{ duration: 0.12 }}
-            className={`text-sm truncate font-semibold ${isActive ? "reasoning-shimmer" : ""}`}
-          >
-            {currentLine}
-          </motion.span>
-        </AnimatePresence>
-
-        {!isActive && sanitizedSummary.length > 1 && (
-          <span className="text-xs text-muted-foreground/50 shrink-0">
-            {sanitizedSummary.length} steps
-          </span>
-        )}
-
-        {isActive ? (
-          <Loader2
-            size={12}
-            className="ml-auto animate-spin shrink-0 opacity-60"
-          />
-        ) : canExpand ? (
-          <ChevronRight
-            size={12}
-            className={`ml-auto shrink-0 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
-          />
-        ) : null}
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <div className="mt-0.5 rounded-full bg-muted/60 p-2 text-muted-foreground">
+            <TitleIcon size={14} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span
+                className={`text-sm font-semibold text-foreground ${isActive ? "reasoning-shimmer" : ""}`}
+              >
+                {title}
+              </span>
+              {detailLines.length > 0 && !isActive && (
+                <span className="text-xs text-muted-foreground/65">
+                  {detailLines.length} step{detailLines.length === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
+            {currentDetail && (
+              <p className="mt-1 truncate text-sm text-muted-foreground">
+                {currentDetail}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="shrink-0 self-start pt-1">
+          {isActive ? (
+            <Loader2 size={14} className="animate-spin text-muted-foreground" />
+          ) : canExpand ? (
+            <ChevronRight
+              size={14}
+              className={`text-muted-foreground/70 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
+            />
+          ) : null}
+        </div>
       </Button>
 
       <AnimatePresence initial={false}>
-        {canExpand && expanded && (
+        {expanded && canExpand && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
@@ -73,18 +100,18 @@ export function ReasoningBlock({
             transition={{ duration: 0.18 }}
             className="overflow-hidden"
           >
-            <div className="mt-2 ml-5 space-y-1 border-l border-border pl-3">
-              {sanitizedSummary.map((line, i) => (
-                <p
-                  key={i}
-                  className="text-xs font-semibold text-muted-foreground leading-5"
-                >
-                  {line}
-                </p>
+            <div className="mt-3 space-y-2 border-t border-border/60 pt-3">
+              {detailLines.map((line, index) => (
+                <div key={`${line}-${String(index)}`} className="flex items-start gap-2">
+                  <div className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/45" />
+                  <p className="text-sm leading-6 text-foreground/90 whitespace-pre-wrap break-words">
+                    {line}
+                  </p>
+                </div>
               ))}
               {text && (
-                <div className="mt-3 pt-3 border-t border-border/60">
-                  <pre className="text-[11px] text-muted-foreground/60 font-mono leading-5 whitespace-pre-wrap break-words">
+                <div className="rounded-xl bg-muted/25 px-3 py-2">
+                  <pre className="text-[11px] text-muted-foreground/80 font-mono leading-5 whitespace-pre-wrap break-words">
                     {text}
                   </pre>
                 </div>

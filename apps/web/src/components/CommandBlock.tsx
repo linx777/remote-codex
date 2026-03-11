@@ -10,6 +10,8 @@ import {
   FolderOpen,
   FileText,
   FileSearch,
+  Compass,
+  PencilLine,
 } from "lucide-react";
 import type { UnifiedItem } from "@farfield/unified-surface";
 import { Button } from "@/components/ui/button";
@@ -26,6 +28,50 @@ const ACTION_ICONS: Record<string, React.ElementType> = {
   readFile: FileSearch,
   writeFile: FileText,
 };
+
+const EXPLORATION_ICON_KEYS = new Set(["search", "listFiles", "read", "readFile"]);
+const EDITING_ICON_KEYS = new Set(["write", "writeFile"]);
+
+function describeCommandHeader(
+  item: CommandItem,
+  headerSegments: ReturnType<typeof summarizeCommandForHeader>,
+): {
+  title: string;
+  subtitle: string;
+  icon: React.ElementType;
+} {
+  const firstSegment = headerSegments[0]?.text ?? "Command";
+  if (item.status === "inProgress") {
+    return {
+      title: "Running 1 terminal",
+      subtitle: firstSegment,
+      icon: Terminal,
+    };
+  }
+
+  const iconKeys = headerSegments.map((segment) => segment.iconKey);
+  if (iconKeys.length > 0 && iconKeys.every((iconKey) => EXPLORATION_ICON_KEYS.has(iconKey))) {
+    return {
+      title: "Exploring",
+      subtitle: firstSegment,
+      icon: Compass,
+    };
+  }
+
+  if (iconKeys.some((iconKey) => EDITING_ICON_KEYS.has(iconKey))) {
+    return {
+      title: "Editing",
+      subtitle: firstSegment,
+      icon: PencilLine,
+    };
+  }
+
+  return {
+    title: "Terminal",
+    subtitle: firstSegment,
+    icon: Terminal,
+  };
+}
 
 interface CommandBlockProps {
   item: CommandItem;
@@ -50,45 +96,58 @@ function CommandBlockComponent({ item, isActive }: CommandBlockProps) {
   const headerSegments = summarizeCommandForHeader(item.command, item.commandActions);
   const displayedHeaderSegments = headerSegments.slice(0, 3);
   const hiddenHeaderSegmentsCount = Math.max(headerSegments.length - 3, 0);
+  const header = describeCommandHeader(item, headerSegments);
+  const HeaderIcon = header.icon;
 
   return (
-    <div className="rounded-xl border border-border overflow-hidden text-sm">
-      {/* Header row */}
+    <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/75 text-sm shadow-sm">
       <Button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         variant="ghost"
-        className="h-auto w-full grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-none bg-muted/40 px-3 py-2 text-left transition-colors hover:bg-muted/70"
+        className="h-auto w-full grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-none bg-muted/30 px-4 py-3 text-left transition-colors hover:bg-muted/55"
       >
-        <div className="min-w-0 overflow-hidden space-y-1">
-          {displayedHeaderSegments.map((segment, index) => {
-            const SegmentIcon = ACTION_ICONS[segment.iconKey] ?? Terminal;
-            return (
-              <div
-                key={`${segment.text}-${String(index)}`}
-                className="min-w-0 flex items-center gap-1.5"
-              >
-                <SegmentIcon
-                  size={8}
-                  className="shrink-0 text-muted-foreground/70"
-                />
-                <code
-                  title={segment.tooltip ?? segment.text}
-                  className="block min-w-0 flex-1 truncate whitespace-nowrap font-mono text-xs text-foreground/80 leading-4"
-                >
-                  {segment.text}
-                </code>
-              </div>
-            );
-          })}
-          {hiddenHeaderSegmentsCount > 0 && (
-            <div className="pl-[14px] text-[10px] leading-4 text-muted-foreground/70">
-              +{hiddenHeaderSegmentsCount} more segment
-              {hiddenHeaderSegmentsCount === 1 ? "" : "s"}
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="mt-0.5 rounded-full bg-muted/70 p-2 text-muted-foreground">
+            <HeaderIcon size={14} />
+          </div>
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="text-sm font-semibold text-foreground">{header.title}</div>
+            <div
+              title={headerSegments[0]?.tooltip ?? header.subtitle}
+              className="truncate text-sm text-muted-foreground"
+            >
+              {header.subtitle}
             </div>
-          )}
+            {displayedHeaderSegments.length > 1 && (
+              <div className="space-y-1 pt-1">
+                {displayedHeaderSegments.slice(1).map((segment, index) => {
+                  const SegmentIcon = ACTION_ICONS[segment.iconKey] ?? Terminal;
+                  return (
+                    <div
+                      key={`${segment.text}-${String(index)}`}
+                      className="flex min-w-0 items-center gap-1.5"
+                    >
+                      <SegmentIcon size={9} className="shrink-0 text-muted-foreground/60" />
+                      <code
+                        title={segment.tooltip ?? segment.text}
+                        className="block min-w-0 flex-1 truncate whitespace-nowrap font-mono text-[11px] text-muted-foreground/80 leading-4"
+                      >
+                        {segment.text}
+                      </code>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {hiddenHeaderSegmentsCount > 0 && (
+              <div className="text-[11px] leading-4 text-muted-foreground/70">
+                +{hiddenHeaderSegmentsCount} more action{hiddenHeaderSegmentsCount === 1 ? "" : "s"}
+              </div>
+            )}
+          </div>
         </div>
-        <div className="shrink-0 flex items-center gap-1.5 self-start">
+        <div className="shrink-0 flex items-center gap-1.5 self-start pt-1">
           {isActive ? (
             <Loader2 size={12} className="animate-spin text-muted-foreground" />
           ) : isCompleted ? (
@@ -122,7 +181,7 @@ function CommandBlockComponent({ item, isActive }: CommandBlockProps) {
             className="overflow-hidden"
           >
             <div className="border-t border-border divide-y divide-border/60">
-              <div className="px-3 py-2 space-y-2">
+              <div className="space-y-2 px-4 py-3">
                 <div>
                   <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                     Command
