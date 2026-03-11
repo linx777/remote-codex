@@ -561,6 +561,7 @@ const AGENT_CACHE_TTL_MS = 30_000;
 const PROVIDER_CATALOG_CACHE_TTL_MS = 20_000;
 const CORE_REFRESH_INTERVAL_MS = 5_000;
 const SELECTED_THREAD_REFRESH_INTERVAL_MS = 1_000;
+const EVENT_REFRESH_DEBOUNCE_MS = 75;
 const DEBUG_UI_ENABLED = import.meta.env.MODE !== "production";
 const MOBILE_SIDEBAR_WIDTH_PX = 256;
 const MOBILE_SWIPE_EDGE_PX = 24;
@@ -2285,8 +2286,8 @@ export function App(): React.JSX.Element {
       await loadCoreData();
       if (selectedThreadIdRef.current)
         await loadSelectedThread(selectedThreadIdRef.current, {
-          includeTurns: true,
-          includeStreamEvents: true,
+          includeTurns: false,
+          includeStreamEvents: activeTabRef.current === "debug",
         });
     } catch (e) {
       setError(toErrorMessage(e));
@@ -2378,8 +2379,8 @@ export function App(): React.JSX.Element {
           const loadThread = loadSelectedThreadRef.current;
           if (loadThread) {
             await loadThread(selectedThreadIdRef.current, {
-              includeTurns: true,
-              includeStreamEvents: true,
+              includeTurns: false,
+              includeStreamEvents: activeTabRef.current === "debug",
             });
           }
         }
@@ -2480,7 +2481,7 @@ export function App(): React.JSX.Element {
         return;
       }
       void load(selectedThreadId, {
-        includeTurns: true,
+        includeTurns: false,
         includeStreamEvents: activeTabRef.current === "debug",
       }).catch((e) =>
         setError(toErrorMessage(e)),
@@ -2550,7 +2551,7 @@ export function App(): React.JSX.Element {
       return;
     }
     void load(selectedThreadId, {
-      includeTurns: true,
+      includeTurns: false,
       includeStreamEvents: activeTabRef.current === "debug",
     }).catch((e) => setError(toErrorMessage(e)));
   }, [selectedThreadId]);
@@ -2615,7 +2616,7 @@ export function App(): React.JSX.Element {
               const loadThread = loadSelectedThreadRef.current;
               if (loadThread) {
                 await loadThread(selectedThreadIdRef.current, {
-                  includeTurns: true,
+                  includeTurns: false,
                   includeStreamEvents: activeTabRef.current === "debug",
                 });
               }
@@ -2624,7 +2625,7 @@ export function App(): React.JSX.Element {
             setError(toErrorMessage(e));
           }
         })();
-      }, 200);
+      }, EVENT_REFRESH_DEBOUNCE_MS);
     };
 
     const scheduleReconnect = () => {
@@ -3109,7 +3110,7 @@ export function App(): React.JSX.Element {
           },
         });
         await loadSelectedThread(selectedThreadId, {
-          includeTurns: true,
+          includeTurns: false,
           includeStreamEvents: activeTabRef.current === "debug",
         });
       } catch (e) {
