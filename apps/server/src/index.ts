@@ -199,6 +199,17 @@ function toErrorMessage(error: unknown): string {
   return String(error);
 }
 
+function isExpectedRateLimitReadFailure(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  return (
+    normalized.includes("429") ||
+    normalized.includes("too many requests") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("rate-limit") ||
+    normalized.includes("authentication required")
+  );
+}
+
 function compactSidebarPreview(preview: string): string {
   const compact = preview.replace(/\s+/g, " ").trim();
   if (compact.length <= SIDEBAR_PREVIEW_MAX_CHARS) {
@@ -1071,7 +1082,11 @@ const server = http.createServer(async (req, res) => {
         jsonResponse(res, 200, { ok: true, ...result });
       } catch (error) {
         const message = toErrorMessage(error);
-        logger.warn({ error: message }, "rate-limits-read-failed");
+        if (isExpectedRateLimitReadFailure(message)) {
+          logger.debug({ error: message }, "rate-limits-read-suppressed");
+        } else {
+          logger.warn({ error: message }, "rate-limits-read-failed");
+        }
         jsonResponse(res, 500, { ok: false, error: message });
       }
       return;

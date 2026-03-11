@@ -22,6 +22,15 @@ const StreamEventSchema = z
   .object({
     method: z.string().optional(),
     type: z.string().optional(),
+    message: z.string().optional(),
+    additional_details: z.string().nullable().optional(),
+    codex_error_info: z
+      .object({
+        message: z.string().optional(),
+      })
+      .passthrough()
+      .nullable()
+      .optional(),
     params: z
       .object({
         changes: z.array(StreamEventFileChangeSchema).optional(),
@@ -30,6 +39,43 @@ const StreamEventSchema = z
       .optional(),
   })
   .passthrough();
+
+function isRateLimitNoiseText(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return (
+    normalized.includes("429") ||
+    normalized.includes("too many requests") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("rate-limit")
+  );
+}
+
+export function shouldDisplayStreamEvent(event: JsonValue): boolean {
+  const parsed = StreamEventSchema.safeParse(event);
+  if (!parsed.success) {
+    return true;
+  }
+
+  const eventType = parsed.data.type?.toLowerCase() ?? "";
+  if (
+    eventType !== "background_event" &&
+    eventType !== "warning" &&
+    eventType !== "stream_error"
+  ) {
+    return true;
+  }
+
+  const candidates = [
+    parsed.data.message,
+    parsed.data.additional_details ?? undefined,
+    parsed.data.codex_error_info?.message,
+    parsed.data.params ? JSON.stringify(parsed.data.params) : undefined,
+  ];
+
+  return !candidates.some(
+    (candidate) => typeof candidate === "string" && isRateLimitNoiseText(candidate),
+  );
+}
 
 export function StreamEventCard({
   event,

@@ -3,6 +3,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ArrowDown } from "lucide-react";
 import type { UnifiedItem } from "@farfield/unified-surface";
 import { ConversationItem } from "@/components/ConversationItem";
+import { ReasoningTimelineGroup } from "@/components/ReasoningTimelineGroup";
+import { ToolTimelineGroup } from "@/components/ToolTimelineGroup";
 import { Button } from "@/components/ui/button";
 
 export interface ChatTimelineEntry {
@@ -29,6 +31,132 @@ interface ChatTimelineProps {
   chatContentRef: React.RefObject<HTMLDivElement | null>;
 }
 
+type ReasoningItem = Extract<UnifiedItem, { type: "reasoning" }>;
+const TOOL_GROUPABLE_ITEM_TYPES = [
+  "commandExecution",
+  "fileChange",
+  "webSearch",
+  "mcpToolCall",
+  "collabAgentToolCall",
+  "remoteTaskCreated",
+  "forkedFromConversation",
+] as const;
+type ToolGroupableType = (typeof TOOL_GROUPABLE_ITEM_TYPES)[number];
+type ToolGroupableItem = Extract<UnifiedItem, { type: ToolGroupableType }>;
+
+type TimelineDisplayEntry =
+  | {
+      kind: "item";
+      key: string;
+      spacingTop: number;
+      entry: ChatTimelineEntry;
+    }
+  | {
+      kind: "reasoningGroup";
+      key: string;
+      spacingTop: number;
+      entries: Array<ChatTimelineEntry & { item: ReasoningItem }>;
+    }
+  | {
+      kind: "toolGroup";
+      key: string;
+      spacingTop: number;
+      entries: Array<ChatTimelineEntry & { item: ToolGroupableItem }>;
+    };
+
+function isReasoningEntry(
+  entry: ChatTimelineEntry,
+): entry is ChatTimelineEntry & { item: ReasoningItem } {
+  return entry.item.type === "reasoning";
+}
+
+function isToolGroupableEntry(
+  entry: ChatTimelineEntry,
+): entry is ChatTimelineEntry & { item: ToolGroupableItem } {
+  return TOOL_GROUPABLE_ITEM_TYPES.includes(entry.item.type as ToolGroupableType);
+}
+
+function groupTimelineEntries(
+  entries: ChatTimelineEntry[],
+): TimelineDisplayEntry[] {
+  const grouped: TimelineDisplayEntry[] = [];
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]!;
+    if (isReasoningEntry(entry)) {
+      const reasoningEntries: Array<ChatTimelineEntry & { item: ReasoningItem }> = [
+        entry,
+      ];
+
+      while (index + 1 < entries.length) {
+        const nextEntry = entries[index + 1];
+        if (!nextEntry || !isReasoningEntry(nextEntry)) {
+          break;
+        }
+        index += 1;
+        reasoningEntries.push(nextEntry);
+      }
+
+      const firstEntry = reasoningEntries[0]!;
+      const lastEntry = reasoningEntries[reasoningEntries.length - 1]!;
+      grouped.push({
+        kind: "reasoningGroup",
+        key:
+          reasoningEntries.length === 1
+            ? `reasoning:${firstEntry.key}`
+            : `reasoning:${firstEntry.key}:${lastEntry.key}`,
+        spacingTop: firstEntry.spacingTop,
+        entries: reasoningEntries,
+      });
+      continue;
+    }
+
+    if (isToolGroupableEntry(entry)) {
+      const toolEntries: Array<ChatTimelineEntry & { item: ToolGroupableItem }> = [
+        entry,
+      ];
+
+      while (index + 1 < entries.length) {
+        const nextEntry = entries[index + 1];
+        if (!nextEntry || !isToolGroupableEntry(nextEntry)) {
+          break;
+        }
+        index += 1;
+        toolEntries.push(nextEntry);
+      }
+
+      if (toolEntries.length === 1) {
+        grouped.push({
+          kind: "item",
+          key: entry.key,
+          spacingTop: entry.spacingTop,
+          entry,
+        });
+        continue;
+      }
+
+      const firstEntry = toolEntries[0]!;
+      const lastEntry = toolEntries[toolEntries.length - 1]!;
+      grouped.push({
+        kind: "toolGroup",
+        key: `tools:${firstEntry.key}:${lastEntry.key}`,
+        spacingTop: firstEntry.spacingTop,
+        entries: toolEntries,
+      });
+      continue;
+    }
+
+    grouped.push({
+      kind: "item",
+      key: entry.key,
+      spacingTop: entry.spacingTop,
+      entry,
+    });
+  }
+
+  return grouped;
+}
+
 export const ChatTimeline = memo(function ChatTimeline({
   selectedThreadId,
   turnsLength,
@@ -42,6 +170,8 @@ export const ChatTimeline = memo(function ChatTimeline({
   scrollRef,
   chatContentRef,
 }: ChatTimelineProps): React.JSX.Element {
+  const timelineEntries = groupTimelineEntries(visibleConversationItems);
+
   return (
     <>
       <div
@@ -91,7 +221,7 @@ export const ChatTimeline = memo(function ChatTimeline({
                     </Button>
                   </div>
                 )}
-                {visibleConversationItems.map((entry) => (
+                {timelineEntries.map((entry) => (
                   <motion.div
                     key={entry.key}
                     layout="position"
@@ -103,14 +233,33 @@ export const ChatTimeline = memo(function ChatTimeline({
                     }}
                     style={{ paddingTop: `${entry.spacingTop}px` }}
                   >
-                    <ConversationItem
-                      item={entry.item}
-                      isLast={entry.isLast}
-                      turnIsInProgress={entry.turnIsInProgress}
-                      onSelectThread={onSelectThread}
-                      previousItemType={entry.previousItemType}
-                      nextItemType={entry.nextItemType}
-                    />
+                    {entry.kind === "reasoningGroup" ? (
+                      <ReasoningTimelineGroup
+                        items={entry.entries.map((reasoningEntry) => reasoningEntry.item)}
+                        isActive={
+                          entry.entries[entry.entries.length - 1]?.isLast === true &&
+                          entry.entries[entry.entries.length - 1]?.turnIsInProgress === true
+                        }
+                      />
+                    ) : entry.kind === "toolGroup" ? (
+                      <ToolTimelineGroup
+                        entries={entry.entries}
+                        isActive={
+                          entry.entries[entry.entries.length - 1]?.isLast === true &&
+                          entry.entries[entry.entries.length - 1]?.turnIsInProgress === true
+                        }
+                        onSelectThread={onSelectThread}
+                      />
+                    ) : (
+                      <ConversationItem
+                        item={entry.entry.item}
+                        isLast={entry.entry.isLast}
+                        turnIsInProgress={entry.entry.turnIsInProgress}
+                        onSelectThread={onSelectThread}
+                        previousItemType={entry.entry.previousItemType}
+                        nextItemType={entry.entry.nextItemType}
+                      />
+                    )}
                   </motion.div>
                 ))}
               </motion.div>

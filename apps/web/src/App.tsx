@@ -83,7 +83,10 @@ import { PendingApprovalCard } from "@/components/PendingApprovalCard";
 import { PendingInformationalRequestCard } from "@/components/PendingInformationalRequestCard";
 import { PendingRequestCard } from "@/components/PendingRequestCard";
 import { SidebarThreadWaitingIndicators } from "@/components/SidebarThreadWaitingIndicators";
-import { StreamEventCard } from "@/components/StreamEventCard";
+import {
+  StreamEventCard,
+  shouldDisplayStreamEvent,
+} from "@/components/StreamEventCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -405,6 +408,57 @@ function buildOptimisticThreadSummary(
   };
 }
 
+function buildThreadSummaryFromConversationState(
+  thread: NonNullable<ReadThreadResponse["thread"]>,
+  previous: Thread | null,
+): Thread {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const createdAt =
+    typeof thread.createdAt === "number"
+      ? normalizeUnixTimestampSeconds(thread.createdAt)
+      : (previous?.createdAt ?? nowSeconds);
+  const updatedAtFromState =
+    typeof thread.updatedAt === "number"
+      ? normalizeUnixTimestampSeconds(thread.updatedAt)
+      : (previous?.updatedAt ?? nowSeconds);
+  const updatedAt = previous
+    ? Math.max(previous.updatedAt, updatedAtFromState)
+    : updatedAtFromState;
+  const normalizedTitle =
+    typeof thread.title === "string" ? thread.title.trim() : "";
+  const preview =
+    previous?.preview.trim() ||
+    normalizedTitle ||
+    (previous?.title && previous.title.trim() ? previous.title.trim() : "") ||
+    "Updated thread";
+
+  return {
+    id: thread.id,
+    provider: thread.provider,
+    preview,
+    createdAt,
+    updatedAt,
+    ...(thread.title !== undefined
+      ? { title: thread.title }
+      : previous?.title !== undefined
+        ? { title: previous.title }
+        : {}),
+    ...(thread.cwd !== undefined
+      ? { cwd: thread.cwd }
+      : previous?.cwd !== undefined
+        ? { cwd: previous.cwd }
+        : {}),
+    ...(thread.source !== undefined
+      ? { source: thread.source }
+      : previous?.source !== undefined
+        ? { source: previous.source }
+        : {}),
+    isGenerating: isThreadGeneratingState(thread),
+    waitingOnApproval: getPendingApprovalRequests(thread).length > 0,
+    waitingOnUserInput: getPendingUserInputRequests(thread).length > 0,
+  };
+}
+
 function mergeIncomingThreads(
   nextThreads: Thread[],
   previousThreads: Thread[],
@@ -459,6 +513,18 @@ function toErrorMessage(err: unknown): string {
     }
   }
   return String(err);
+}
+
+function isPersistentRateLimitFailure(errorMessage: string): boolean {
+  const normalized = errorMessage.toLowerCase();
+  return (
+    normalized.includes("authentication required") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("forbidden") ||
+    normalized.includes("no agent supports rate limit reading") ||
+    normalized.includes("provider disabled") ||
+    normalized.includes("provider unavailable")
+  );
 }
 
 function buildThreadListErrorMessage(
@@ -561,7 +627,13 @@ const AGENT_CACHE_TTL_MS = 30_000;
 const PROVIDER_CATALOG_CACHE_TTL_MS = 20_000;
 const CORE_REFRESH_INTERVAL_MS = 5_000;
 const SELECTED_THREAD_REFRESH_INTERVAL_MS = 1_000;
+const IDLE_SELECTED_THREAD_REFRESH_INTERVAL_MS = 4_000;
 const EVENT_REFRESH_DEBOUNCE_MS = 75;
+const RATE_LIMIT_REFRESH_INTERVAL_MS = 60_000;
+const IDLE_RATE_LIMIT_REFRESH_INTERVAL_MS = 5 * 60_000;
+const RATE_LIMIT_FAILURE_BACKOFF_MS = 5 * 60_000;
+const MAX_RATE_LIMIT_FAILURE_BACKOFF_MS = 30 * 60_000;
+const PERSISTENT_RATE_LIMIT_FAILURE_BACKOFF_MS = 60 * 60_000;
 const DEBUG_UI_ENABLED = import.meta.env.MODE !== "production";
 const MOBILE_SIDEBAR_WIDTH_PX = 256;
 const MOBILE_SWIPE_EDGE_PX = 24;
@@ -808,6 +880,10 @@ function conversationProgressSignature(
   const lastTurnId = lastTurn.id ?? lastTurn.turnId ?? "";
   const items = lastTurn.items ?? [];
   const lastItem = items[items.length - 1];
+  const requests = state.requests;
+  const pendingRequests = requests.filter((request) => request.completed !== true);
+  const lastRequest = requests[requests.length - 1];
+  const lastPendingRequest = pendingRequests[pendingRequests.length - 1];
 
   return [
     String(state.turns.length),
@@ -816,6 +892,12 @@ function conversationProgressSignature(
     String(items.length),
     lastItem?.id ?? "",
     lastItem?.type ?? "",
+    String(requests.length),
+    String(pendingRequests.length),
+    lastRequest ? `${String(lastRequest.id)}:${lastRequest.method}` : "",
+    lastPendingRequest
+      ? `${String(lastPendingRequest.id)}:${lastPendingRequest.method}`
+      : "",
   ].join("|");
 }
 
@@ -1169,6 +1251,7 @@ export function App(): React.JSX.Element {
   const [rateLimits, setRateLimits] = useState<
     Awaited<ReturnType<typeof getAccountRateLimits>> | null
   >(null);
+  const [liveEventsConnected, setLiveEventsConnected] = useState(false);
   const [dragOverGroupKey, setDragOverGroupKey] = useState<string | null>(null);
   const [draggedGroupKey, setDraggedGroupKey] = useState<string | null>(null);
 
@@ -1192,6 +1275,7 @@ export function App(): React.JSX.Element {
   const lastAppliedModeSignatureRef = useRef("");
   const hasHydratedAgentSelectionRef = useRef(false);
   const threadProviderByIdRef = useRef<Map<string, AgentId>>(new Map());
+  const threadsRef = useRef<Thread[]>(initialSnapshot?.threads ?? []);
   const optimisticSelectedThreadIdsRef = useRef<Set<string>>(new Set());
   const loadCoreDataRef = useRef<(() => Promise<void>) | null>(null);
   const loadSelectedThreadRef = useRef<
@@ -1218,6 +1302,10 @@ export function App(): React.JSX.Element {
   const providerCatalogCacheRef = useRef<
     Map<AgentId, ProviderCatalogCacheEntry>
   >(new Map());
+  const rateLimitRefreshStateRef = useRef({
+    nextAllowedAt: 0,
+    failureCount: 0,
+  });
   const threadsSignatureRef = useRef<string[]>([]);
   const modesSignatureRef = useRef<string[]>([]);
   const modelsSignatureRef = useRef<string[]>([]);
@@ -1625,6 +1713,12 @@ export function App(): React.JSX.Element {
   const turns = deferredConversationState?.turns ?? [];
   const lastTurn = turns[turns.length - 1];
   const isGenerating = isTurnInProgressStatus(lastTurn?.status);
+  const selectedThreadRefreshIntervalMs =
+    isGenerating ||
+    selectedThreadWaitingState?.waitingOnApproval === true ||
+    selectedThreadWaitingState?.waitingOnUserInput === true
+      ? SELECTED_THREAD_REFRESH_INTERVAL_MS
+      : IDLE_SELECTED_THREAD_REFRESH_INTERVAL_MS;
   const canUseComposer = isGenerating
     ? canInterruptForActiveAgent
     : selectedThreadId
@@ -1702,6 +1796,10 @@ export function App(): React.JSX.Element {
   const hasHiddenChatItems = conversationWindow.hasHidden;
   const visibleConversationItems = conversationWindow.visibleItems;
   const visibleConversationItemCount = visibleConversationItems.length;
+  const visibleStreamEvents = useMemo(
+    () => streamEvents.filter((event) => shouldDisplayStreamEvent(event)),
+    [streamEvents],
+  );
   const commitLabel = health?.state.gitCommit ?? "unknown";
   const scrollChatToBottom = useCallback(() => {
     const scroller = scrollRef.current;
@@ -1771,7 +1869,61 @@ export function App(): React.JSX.Element {
       : Promise.resolve(cachedAgents.value);
 
     const healthPromise = getHealth();
-    const rateLimitsPromise = getAccountRateLimits().catch(() => null);
+    const selectedThreadProvider =
+      selectedThreadIdRef.current === null
+        ? null
+        : threadProviderByIdRef.current.get(selectedThreadIdRef.current) ??
+          threadsRef.current.find((thread) => thread.id === selectedThreadIdRef.current)
+            ?.provider ??
+          null;
+    const selectedThreadSummary =
+      selectedThreadIdRef.current === null
+        ? null
+        : threadsRef.current.find(
+            (thread) => thread.id === selectedThreadIdRef.current,
+          ) ?? null;
+    const shouldLoadRateLimits =
+      (selectedThreadProvider ?? selectedAgentId) === "codex";
+    const selectedThreadLikelyActive =
+      selectedThreadSummary?.isGenerating === true ||
+      selectedThreadSummary?.waitingOnApproval === true ||
+      selectedThreadSummary?.waitingOnUserInput === true;
+    const rateLimitRefreshIntervalMs = selectedThreadLikelyActive
+      ? RATE_LIMIT_REFRESH_INTERVAL_MS
+      : IDLE_RATE_LIMIT_REFRESH_INTERVAL_MS;
+    const rateLimitsPromise: Promise<
+      Awaited<ReturnType<typeof getAccountRateLimits>> | undefined
+    > = shouldLoadRateLimits
+      ? (async () => {
+          const refreshState = rateLimitRefreshStateRef.current;
+          if (now < refreshState.nextAllowedAt) {
+            return undefined;
+          }
+
+          try {
+            const result = await getAccountRateLimits();
+            refreshState.failureCount = 0;
+            refreshState.nextAllowedAt = Date.now() + rateLimitRefreshIntervalMs;
+            return result;
+          } catch (error) {
+            const message = toErrorMessage(error).toLowerCase();
+            const persistentFailure = isPersistentRateLimitFailure(message);
+            if (persistentFailure) {
+              refreshState.failureCount = 0;
+            } else {
+              refreshState.failureCount += 1;
+            }
+            const backoffMs = persistentFailure
+              ? PERSISTENT_RATE_LIMIT_FAILURE_BACKOFF_MS
+              : Math.min(
+                  RATE_LIMIT_FAILURE_BACKOFF_MS * refreshState.failureCount,
+                  MAX_RATE_LIMIT_FAILURE_BACKOFF_MS,
+                );
+            refreshState.nextAllowedAt = Date.now() + backoffMs;
+            return undefined;
+          }
+        })()
+      : Promise.resolve(undefined);
     const sidebarPromise = listSidebarThreads({
       limit: 80,
       archived: false,
@@ -1850,15 +2002,12 @@ export function App(): React.JSX.Element {
     if (historyResult.status === "rejected") {
       console.error("Failed to load debug history", historyResult.reason);
     }
-    if (rateLimitsResult.status === "rejected") {
-      console.error("Failed to load account rate limits", rateLimitsResult.reason);
-    }
 
     const nh = healthResult.status === "fulfilled" ? healthResult.value : null;
     const nag = agentsResult.status === "fulfilled" ? agentsResult.value : null;
     const ntr = traceResult.status === "fulfilled" ? traceResult.value : null;
     const nhist = historyResult.status === "fulfilled" ? historyResult.value : null;
-    const nrl = rateLimitsResult.status === "fulfilled" ? rateLimitsResult.value : null;
+    const nrl = rateLimitsResult.status === "fulfilled" ? rateLimitsResult.value : undefined;
 
     const nextAgents = nag?.agents ?? agentDescriptors;
     const nextDefaultAgentId = nag?.defaultAgentId ?? selectedAgentId;
@@ -1963,7 +2112,7 @@ export function App(): React.JSX.Element {
         return nhist.history;
       });
     }
-    if (nrl) {
+    if (nrl !== undefined) {
       setRateLimits(nrl);
     }
     if (nag) {
@@ -2110,17 +2259,33 @@ export function App(): React.JSX.Element {
     ) => {
       const includeTurns = options?.includeTurns ?? true;
       const includeStreamEvents = options?.includeStreamEvents ?? includeTurns;
-      let threadAgentId = threadProviderByIdRef.current.get(threadId) ?? null;
-      let read =
-        threadAgentId === null
-          ? await readThread(threadId, {
-              includeTurns,
-            })
-          : await readThread(threadId, {
-              includeTurns,
-              provider: threadAgentId,
-            });
-      threadAgentId = read.thread.provider;
+      const existingCachedState =
+        threadViewStateCacheRef.current.get(threadId) ?? null;
+      const currentThreadSummary =
+        threadsRef.current.find((thread) => thread.id === threadId) ?? null;
+      let threadAgentId =
+        threadProviderByIdRef.current.get(threadId) ??
+        currentThreadSummary?.provider ??
+        existingCachedState?.readThreadState?.thread.provider ??
+        null;
+      let read = existingCachedState?.readThreadState ?? null;
+
+      if (threadAgentId === null || includeTurns) {
+        read =
+          threadAgentId === null
+            ? await readThread(threadId, {
+                includeTurns,
+              })
+            : await readThread(threadId, {
+                includeTurns,
+                provider: threadAgentId,
+              });
+        threadAgentId = read.thread.provider;
+      }
+
+      if (threadAgentId === null) {
+        throw new Error(`Unable to resolve provider for thread ${threadId}`);
+      }
       threadProviderByIdRef.current.set(threadId, threadAgentId);
 
       const descriptor = agentsById[threadAgentId];
@@ -2134,7 +2299,7 @@ export function App(): React.JSX.Element {
           : canUseFeature(descriptor, "readStreamEvents");
       let shouldReadTurns = includeTurns || !canReadLiveState;
 
-      if (shouldReadTurns && !includeTurns) {
+      if (shouldReadTurns && (read === null || !includeTurns)) {
         read = await readThread(threadId, {
           includeTurns: true,
           provider: threadAgentId,
@@ -2152,12 +2317,18 @@ export function App(): React.JSX.Element {
           };
 
       if (!shouldReadTurns && live.conversationState === null) {
-        read = await readThread(threadId, {
-          includeTurns: true,
-          provider: threadAgentId,
-        });
-        shouldReadTurns = true;
+        if (read?.thread.turns.length) {
+          shouldReadTurns = true;
+        } else {
+          read = await readThread(threadId, {
+            includeTurns: true,
+            provider: threadAgentId,
+          });
+          shouldReadTurns = true;
+        }
       }
+      const summarySource =
+        live.conversationState ?? read?.thread ?? currentThreadSummary;
       const shouldLoadStreamEvents =
         canReadStreamEvents &&
         (activeTabRef.current === "debug" ||
@@ -2165,26 +2336,26 @@ export function App(): React.JSX.Element {
         (includeStreamEvents || threadAgentId === "codex");
       const shouldUpdateSelectedThread =
         selectedThreadIdRef.current === threadId;
-      const existingCachedState =
-        threadViewStateCacheRef.current.get(threadId) ?? null;
       let nextStreamEvents = existingCachedState?.streamEvents ?? [];
       startTransition(() => {
         setThreads((previousThreads) => {
           const nextIsGenerating = live.conversationState
             ? isThreadGeneratingState(live.conversationState)
-            : isThreadGeneratingState(read.thread);
+            : read?.thread
+              ? isThreadGeneratingState(read.thread)
+              : (currentThreadSummary?.isGenerating ?? false);
           const nextThreads = previousThreads.map((threadSummary) => {
-            if (threadSummary.id !== read.thread.id) {
+            if (threadSummary.id !== threadId) {
               return threadSummary;
             }
 
             const nextUpdatedAt =
-              typeof read.thread.updatedAt === "number"
-                ? Math.max(threadSummary.updatedAt, read.thread.updatedAt)
+              typeof summarySource?.updatedAt === "number"
+                ? Math.max(threadSummary.updatedAt, summarySource.updatedAt)
                 : threadSummary.updatedAt;
             const nextTitle =
-              read.thread.title !== undefined
-                ? read.thread.title
+              summarySource?.title !== undefined
+                ? summarySource.title
                 : threadSummary.title;
             const hadGenerating = threadSummary.isGenerating ?? false;
 
@@ -2330,6 +2501,7 @@ export function App(): React.JSX.Element {
   }, [selectedThreadId]);
 
   useEffect(() => {
+    threadsRef.current = threads;
     const next = new Map(threadProviderByIdRef.current);
     for (const thread of threads) {
       next.set(thread.id, thread.provider);
@@ -2498,7 +2670,7 @@ export function App(): React.JSX.Element {
       }
       selectedThreadRefreshIntervalRef.current = window.setInterval(
         refreshSelectedThreadData,
-        SELECTED_THREAD_REFRESH_INTERVAL_MS,
+        selectedThreadRefreshIntervalMs,
       );
     };
 
@@ -2526,7 +2698,7 @@ export function App(): React.JSX.Element {
       window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("pageshow", onPageShow);
     };
-  }, [selectedThreadId]);
+  }, [selectedThreadId, selectedThreadRefreshIntervalMs]);
 
   useEffect(() => {
     if (!selectedThreadId) {
@@ -2646,6 +2818,7 @@ export function App(): React.JSX.Element {
 
       source = new EventSource(unifiedEventsUrl);
       source.onopen = () => {
+        setLiveEventsConnected(true);
         reconnectDelayMs = 1000;
         if (hasOpenedConnection) {
           return;
@@ -2681,12 +2854,69 @@ export function App(): React.JSX.Element {
               providerCatalogCacheRef.current.clear();
               refreshCore = true;
             } else if (parsedEvent.kind === "threadUpdated") {
-              refreshCore = true;
-              if (
-                selectedThreadIdRef.current &&
-                parsedEvent.threadId === selectedThreadIdRef.current
-              ) {
-                refreshSelectedThread = true;
+              const cachedState =
+                threadViewStateCacheRef.current.get(parsedEvent.threadId) ?? null;
+              const previousThread =
+                threadsRef.current.find(
+                  (threadSummary) => threadSummary.id === parsedEvent.threadId,
+                ) ?? null;
+              const nextReadState: ReadThreadResponse = {
+                thread: parsedEvent.thread,
+              };
+              const nextCachedLiveState =
+                cachedState?.liveState?.threadId === parsedEvent.threadId
+                  ? {
+                      ...cachedState.liveState,
+                      conversationState: parsedEvent.thread,
+                    }
+                  : (cachedState?.liveState ?? null);
+
+              threadProviderByIdRef.current.set(
+                parsedEvent.threadId,
+                parsedEvent.provider,
+              );
+              upsertSidebarThread(
+                buildThreadSummaryFromConversationState(
+                  parsedEvent.thread,
+                  previousThread,
+                ),
+              );
+              threadViewStateCacheRef.current.set(parsedEvent.threadId, {
+                readThreadState: nextReadState,
+                liveState: nextCachedLiveState,
+                streamEvents: cachedState?.streamEvents ?? [],
+              });
+
+              const isSelectedThread =
+                selectedThreadIdRef.current !== null &&
+                parsedEvent.threadId === selectedThreadIdRef.current;
+              if (isSelectedThread) {
+                setReadThreadState((prev) => {
+                  if (
+                    buildReadThreadSyncSignature(prev) ===
+                    buildReadThreadSyncSignature(nextReadState)
+                  ) {
+                    return prev;
+                  }
+                  return nextReadState;
+                });
+                setLiveState((prev) => {
+                  if (!prev || prev.threadId !== parsedEvent.threadId) {
+                    return prev;
+                  }
+                  const nextLiveState = {
+                    ...prev,
+                    conversationState: parsedEvent.thread,
+                  };
+                  if (
+                    buildLiveStateSyncSignature(prev) ===
+                    buildLiveStateSyncSignature(nextLiveState)
+                  ) {
+                    return prev;
+                  }
+                  return nextLiveState;
+                });
+                refreshSelectedThread = activeTabRef.current === "debug";
               }
             } else if (
               parsedEvent.kind === "userInputRequested" ||
@@ -2696,7 +2926,6 @@ export function App(): React.JSX.Element {
                 selectedThreadIdRef.current &&
                 parsedEvent.threadId === selectedThreadIdRef.current
               ) {
-                refreshCore = true;
                 refreshSelectedThread = true;
               }
             } else if (parsedEvent.kind === "error") {
@@ -2712,6 +2941,7 @@ export function App(): React.JSX.Element {
       };
 
       source.onerror = () => {
+        setLiveEventsConnected(false);
         if (source) {
           source.close();
           source = null;
@@ -2734,6 +2964,7 @@ export function App(): React.JSX.Element {
         refreshHistory: false,
         refreshSelectedThread: false,
       };
+      setLiveEventsConnected(false);
       if (source) {
         source.close();
         source = null;
@@ -3042,7 +3273,10 @@ export function App(): React.JSX.Element {
             ? { ownerClientId: liveState.ownerClientId }
             : {}),
         });
-        await refreshAll();
+        await loadSelectedThread(threadId, {
+          includeTurns: false,
+          includeStreamEvents: activeTabRef.current === "debug",
+        });
       } catch (e) {
         setError(toErrorMessage(e));
       } finally {
@@ -3053,8 +3287,8 @@ export function App(): React.JSX.Element {
       activeThreadAgentId,
       canSendMessageForActiveAgent,
       hasResolvedSelectedThreadProvider,
+      loadSelectedThread,
       liveState?.ownerClientId,
-      refreshAll,
       selectedAgentId,
       selectedThreadId,
       upsertSidebarThread,
@@ -3155,7 +3389,10 @@ export function App(): React.JSX.Element {
           : {}),
         response: { answers },
       });
-      await refreshAll();
+      await loadSelectedThread(selectedThreadId, {
+        includeTurns: false,
+        includeStreamEvents: activeTabRef.current === "debug",
+      });
     } catch (e) {
       setError(toErrorMessage(e));
     } finally {
@@ -3166,8 +3403,8 @@ export function App(): React.JSX.Element {
     activeThreadAgentId,
     answerDraft,
     hasResolvedSelectedThreadProvider,
+    loadSelectedThread,
     liveState?.ownerClientId,
-    refreshAll,
     selectedThreadId,
   ]);
 
@@ -3189,7 +3426,10 @@ export function App(): React.JSX.Element {
           : {}),
         response: { answers: {} },
       });
-      await refreshAll();
+      await loadSelectedThread(selectedThreadId, {
+        includeTurns: false,
+        includeStreamEvents: activeTabRef.current === "debug",
+      });
     } catch (e) {
       setError(toErrorMessage(e));
     } finally {
@@ -3199,8 +3439,8 @@ export function App(): React.JSX.Element {
     activeRequest,
     activeThreadAgentId,
     hasResolvedSelectedThreadProvider,
+    loadSelectedThread,
     liveState?.ownerClientId,
-    refreshAll,
     selectedThreadId,
   ]);
 
@@ -3224,7 +3464,10 @@ export function App(): React.JSX.Element {
             : {}),
           response: buildApprovalResponse(activeApprovalRequest, action),
         });
-        await refreshAll();
+        await loadSelectedThread(selectedThreadId, {
+          includeTurns: false,
+          includeStreamEvents: activeTabRef.current === "debug",
+        });
       } catch (e) {
         setError(toErrorMessage(e));
       } finally {
@@ -3235,8 +3478,8 @@ export function App(): React.JSX.Element {
       activeApprovalRequest,
       activeThreadAgentId,
       hasResolvedSelectedThreadProvider,
+      loadSelectedThread,
       liveState?.ownerClientId,
-      refreshAll,
       selectedThreadId,
     ],
   );
@@ -3257,7 +3500,10 @@ export function App(): React.JSX.Element {
           ? { ownerClientId: liveState.ownerClientId }
           : {}),
       });
-      await refreshAll();
+      await loadSelectedThread(selectedThreadId, {
+        includeTurns: false,
+        includeStreamEvents: activeTabRef.current === "debug",
+      });
     } catch (e) {
       setError(toErrorMessage(e));
     } finally {
@@ -3267,8 +3513,8 @@ export function App(): React.JSX.Element {
     activeThreadAgentId,
     canInterruptForActiveAgent,
     hasResolvedSelectedThreadProvider,
+    loadSelectedThread,
     liveState?.ownerClientId,
-    refreshAll,
     selectedThreadId,
   ]);
 
@@ -3346,14 +3592,23 @@ export function App(): React.JSX.Element {
         setSelectedThreadId(created.threadId);
         selectedThreadIdRef.current = created.threadId;
         closeMobileSidebar();
-        await refreshAll();
+        await loadSelectedThread(created.threadId, {
+          includeTurns: false,
+          includeStreamEvents: activeTabRef.current === "debug",
+        });
       } catch (e) {
         setError(toErrorMessage(e));
       } finally {
         setIsBusy(false);
       }
     },
-    [agentsById, closeMobileSidebar, refreshAll, selectedAgentId, upsertSidebarThread],
+    [
+      agentsById,
+      closeMobileSidebar,
+      loadSelectedThread,
+      selectedAgentId,
+      upsertSidebarThread,
+    ],
   );
 
   const createThreadForSingleAgent = useCallback(
@@ -4732,11 +4987,11 @@ export function App(): React.JSX.Element {
                           Stream Events
                         </span>
                         <span className="text-xs text-muted-foreground/60">
-                          {streamEvents.length}
+                          {visibleStreamEvents.length}
                         </span>
                       </div>
                       <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
-                        {streamEvents
+                        {visibleStreamEvents
                           .slice()
                           .reverse()
                           .map((evt, i) => (
