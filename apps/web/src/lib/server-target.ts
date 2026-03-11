@@ -48,6 +48,14 @@ const ServerBaseUrlSchema = z
     return url.toString().replace(/\/$/, "");
   });
 
+const configuredServerBaseUrl = (() => {
+  const configured = import.meta.env["VITE_FARFIELD_SERVER_URL"];
+  if (typeof configured !== "string" || configured.trim().length === 0) {
+    return null;
+  }
+  return ServerBaseUrlSchema.parse(configured);
+})();
+
 const StoredServerTargetSchema = z
   .object({
     version: z.literal(1),
@@ -79,6 +87,10 @@ function isLocalHost(hostname: string): boolean {
 }
 
 export function getDefaultServerBaseUrl(): string {
+  if (configuredServerBaseUrl !== null) {
+    return configuredServerBaseUrl;
+  }
+
   if (typeof window === "undefined") {
     return `http://127.0.0.1:${String(DEFAULT_SERVER_PORT)}`;
   }

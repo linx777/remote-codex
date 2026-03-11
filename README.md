@@ -122,6 +122,44 @@ If you need a custom backend origin for API proxying:
 FARFIELD_API_ORIGIN=http://127.0.0.1:4311 bun run start
 ```
 
+## Deploying the frontend to Vercel
+
+You can deploy only the frontend and keep the Farfield backend running elsewhere.
+
+This repo now supports a build-time default backend URL for hosted frontends:
+
+```bash
+VITE_FARFIELD_SERVER_URL=https://your-server.example.com bun run --filter @farfield/web build
+```
+
+The deployed app still lets each browser override this in **Settings**. The saved setting in browser storage wins over the build-time default.
+
+### Recommended Vercel setup
+
+Use the repo root as the Vercel project root. `vercel.json` is included with the correct install/build/output settings.
+
+In Vercel, set:
+
+- Framework preset: `Other`
+- Root directory: repo root
+- Build command: taken from `vercel.json`
+- Output directory: taken from `vercel.json`
+- Install command: taken from `vercel.json`
+
+Add this environment variable in Vercel if your backend lives on another origin:
+
+- `VITE_FARFIELD_SERVER_URL=https://your-server.example.com`
+
+After deploy:
+
+1. Open your Vercel URL.
+2. If needed, open **Settings** in the app and change the server URL.
+3. Make sure the browser can actually reach the backend URL you configured.
+
+### Important networking note
+
+If your backend is only reachable over a private VPN such as Tailscale, the device opening the Vercel-hosted frontend must also be on that VPN. Vercel is only hosting the static frontend; your browser still talks directly to the Farfield backend.
+
 ### React Compiler and production profiling
 
 Frontend build supports two optional flags:

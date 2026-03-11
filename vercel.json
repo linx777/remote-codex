@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "bun install --frozen-lockfile",
+  "buildCommand": "bun run prepare:workspace-dist && bun run --filter @farfield/web build",
+  "outputDirectory": "apps/web/dist"
+}
