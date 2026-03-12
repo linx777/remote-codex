@@ -419,7 +419,7 @@ export class CodexAgentAdapter implements AgentAdapter {
     } catch (error) {
       const typedError = error instanceof Error ? error : null;
       const shouldTryResume =
-        isThreadNotLoadedAppServerRpcError(typedError) ||
+        isRetryableThreadLookupAppServerRpcError(typedError) ||
         (input.includeTurns &&
           (isThreadNotMaterializedIncludeTurnsAppServerRpcError(typedError) ||
             isThreadNoRolloutIncludeTurnsAppServerRpcError(typedError)));
@@ -1151,7 +1151,7 @@ export class CodexAgentAdapter implements AgentAdapter {
       return await this.runAppServerCall(operation);
     } catch (error) {
       const typedError = error instanceof Error ? error : null;
-      if (!isInvalidRequestAppServerRpcError(typedError)) {
+      if (!isRetryableThreadLookupAppServerRpcError(typedError)) {
         throw error;
       }
 
@@ -1249,6 +1249,20 @@ function toErrorMessage(error: Error | string | unknown): string {
 
 const INVALID_REQUEST_ERROR_CODE = -32600;
 
+function isRetryableThreadLookupAppServerRpcError(
+  error: Error | null,
+): boolean {
+  if (!(error instanceof AppServerRpcError)) {
+    return false;
+  }
+  const normalized = error.message.trim().toLowerCase();
+  return (
+    normalized.includes("thread not found") ||
+    normalized.includes("thread not loaded") ||
+    normalized.includes("conversation not found")
+  );
+}
+
 export function isInvalidRequestAppServerRpcError(
   error: Error | null,
 ): boolean {
@@ -1277,10 +1291,7 @@ export function isThreadNotMaterializedIncludeTurnsAppServerRpcError(
 export function isThreadNotLoadedAppServerRpcError(
   error: Error | null,
 ): boolean {
-  if (!isInvalidRequestAppServerRpcError(error)) {
-    return false;
-  }
-  if (!error) {
+  if (!(error instanceof AppServerRpcError)) {
     return false;
   }
   const normalized = error.message.trim().toLowerCase();

@@ -125,17 +125,17 @@ describe("isThreadNotLoadedAppServerRpcError", () => {
         ),
       ),
     ).toBe(true);
+    expect(
+      isThreadNotLoadedAppServerRpcError(
+        new AppServerRpcError(-32603, "thread not loaded"),
+      ),
+    ).toBe(true);
   });
 
   it("returns false for other errors", () => {
     expect(
       isThreadNotLoadedAppServerRpcError(
         new AppServerRpcError(-32600, "thread not found"),
-      ),
-    ).toBe(false);
-    expect(
-      isThreadNotLoadedAppServerRpcError(
-        new AppServerRpcError(-32603, "thread not loaded"),
       ),
     ).toBe(false);
     expect(
