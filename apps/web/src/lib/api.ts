@@ -320,6 +320,7 @@ const PROVIDER_LABELS: Record<UnifiedProviderId, string> = {
   codex: "Codex",
   opencode: "OpenCode",
 };
+const API_REQUEST_TIMEOUT_MS = 45_000;
 
 export type AgentId = UnifiedProviderId;
 
@@ -420,16 +421,80 @@ function withServerApiPassword(init?: RequestInit): RequestInit | undefined {
   };
 }
 
+function withRequestTimeout(init?: RequestInit): {
+  init: RequestInit;
+  cleanup: () => void;
+  timedOut: () => boolean;
+} {
+  const controller = new AbortController();
+  let hasTimedOut = false;
+  const timeoutId = globalThis.setTimeout(() => {
+    hasTimedOut = true;
+    controller.abort();
+  }, API_REQUEST_TIMEOUT_MS);
+
+  const sourceSignal = init?.signal ?? null;
+  let abortListener: (() => void) | null = null;
+  if (sourceSignal) {
+    const forwardAbort = () => {
+      controller.abort();
+    };
+    if (sourceSignal.aborted) {
+      forwardAbort();
+    } else {
+      sourceSignal.addEventListener("abort", forwardAbort, { once: true });
+      abortListener = () => {
+        sourceSignal.removeEventListener("abort", forwardAbort);
+      };
+    }
+  }
+
+  return {
+    init: {
+      ...(init ?? {}),
+      signal: controller.signal,
+    },
+    cleanup: () => {
+      globalThis.clearTimeout(timeoutId);
+      if (abortListener) {
+        abortListener();
+      }
+    },
+    timedOut: () => hasTimedOut,
+  };
+}
+
 async function requestJson(
   path: string,
   init?: RequestInit,
 ): Promise<{ response: Response; payload: JsonValue }> {
-  const response = await fetch(buildServerUrl(path), withServerApiPassword(init));
-  const payload = JsonValueSchema.parse(await response.json());
-  return {
-    response,
-    payload,
-  };
+  const requestInit = withServerApiPassword(init);
+  const timedRequest = withRequestTimeout(requestInit);
+
+  try {
+    const response = await fetch(buildServerUrl(path), timedRequest.init);
+    const payload = JsonValueSchema.parse(await response.json());
+    return {
+      response,
+      payload,
+    };
+  } catch (error) {
+    if (
+      timedRequest.timedOut() &&
+      error instanceof DOMException &&
+      error.name === "AbortError"
+    ) {
+      throw new ApiRequestError(
+        `Request timed out after ${String(API_REQUEST_TIMEOUT_MS / 1000)} seconds`,
+        {
+          code: "requestTimeout",
+        },
+      );
+    }
+    throw error;
+  } finally {
+    timedRequest.cleanup();
+  }
 }
 
 function readApiFailure(payload: JsonValue): {

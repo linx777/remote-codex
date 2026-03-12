@@ -3260,11 +3260,11 @@ export function App(): React.JSX.Element {
   /* Actions */
   const submitMessage = useCallback(
     async (draft: string) => {
-      if (!draft.trim()) return;
-      if (!canSendMessageForActiveAgent) return;
+      if (!draft.trim()) return false;
+      if (!canSendMessageForActiveAgent) return false;
       if (selectedThreadId && !hasResolvedSelectedThreadProvider) {
         setError("Thread provider is still loading");
-        return;
+        return false;
       }
 
       setIsBusy(true);
@@ -3302,12 +3302,16 @@ export function App(): React.JSX.Element {
             ? { ownerClientId: liveState.ownerClientId }
             : {}),
         });
-        await loadSelectedThread(threadId, {
+        void loadSelectedThread(threadId, {
           includeTurns: false,
           includeStreamEvents: activeTabRef.current === "debug",
+        }).catch((e) => {
+          setError(toErrorMessage(e));
         });
+        return true;
       } catch (e) {
         setError(toErrorMessage(e));
+        return false;
       } finally {
         setIsBusy(false);
       }

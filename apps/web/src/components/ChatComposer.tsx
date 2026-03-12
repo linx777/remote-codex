@@ -9,7 +9,7 @@ type ChatComposerProps = {
   isGenerating: boolean;
   placeholder?: string;
   onInterrupt: () => void | Promise<void>;
-  onSend: (text: string) => void | Promise<void>;
+  onSend: (text: string) => boolean | Promise<boolean>;
 };
 
 export function ChatComposer({
@@ -84,9 +84,17 @@ export function ChatComposer({
       return;
     }
 
-    await onSend(draft);
+    const draftToSend = draft;
     setDraft("");
     previousHeightRef.current = 0;
+
+    const sent = await onSend(draftToSend);
+    if (!sent) {
+      setDraft((currentDraft) =>
+        currentDraft.length > 0 ? currentDraft : draftToSend,
+      );
+      previousHeightRef.current = 0;
+    }
   }, [canSend, draft, isBusy, isGenerating, onInterrupt, onSend]);
 
   const disableSend = isGenerating
