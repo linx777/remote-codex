@@ -3873,16 +3873,6 @@ export function App(): React.JSX.Element {
                 <div
                   key={group.key}
                   className={`space-y-1 ${dragOverGroupKey === group.key ? "ring-1 ring-primary/40 rounded-lg" : ""}`}
-                  draggable
-                  onDragStart={(event) => {
-                    setDraggedGroupKey(group.key);
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData("text/plain", group.key);
-                  }}
-                  onDragEnd={() => {
-                    setDraggedGroupKey(null);
-                    setDragOverGroupKey(null);
-                  }}
                   onDragOver={(event) => {
                     event.preventDefault();
                     event.dataTransfer.dropEffect = "move";
@@ -3920,7 +3910,19 @@ export function App(): React.JSX.Element {
                   }}
                 >
                   <div className="flex items-center gap-0.5">
-                    <span className="shrink-0 cursor-grab text-muted-foreground/30 hover:text-muted-foreground/60">
+                    <span
+                      className="shrink-0 cursor-grab text-muted-foreground/30 hover:text-muted-foreground/60"
+                      draggable
+                      onDragStart={(event) => {
+                        setDraggedGroupKey(group.key);
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", group.key);
+                      }}
+                      onDragEnd={() => {
+                        setDraggedGroupKey(null);
+                        setDragOverGroupKey(null);
+                      }}
+                    >
                       <GripVertical size={11} />
                     </span>
                     {colorAccent && (
