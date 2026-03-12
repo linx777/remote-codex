@@ -30,10 +30,12 @@ import {
   buildServerUrl,
   clearStoredServerTarget,
   getDefaultServerBaseUrl as getDefaultStoredServerBaseUrl,
+  normalizeServerApiPassword,
   parseServerBaseUrl,
   readStoredServerTarget,
+  resolveServerApiPassword,
   resolveServerBaseUrl,
-  saveServerBaseUrl,
+  saveServerTarget,
 } from "./server-target";
 
 const ApiEnvelopeSchema = z
@@ -361,12 +363,23 @@ export function getSavedServerBaseUrl(): string | null {
   return stored?.baseUrl ?? null;
 }
 
+export function getSavedServerApiPassword(): string | null {
+  return resolveServerApiPassword();
+}
+
 export function getDefaultServerBaseUrl(): string {
   return getDefaultStoredServerBaseUrl();
 }
 
-export function setServerBaseUrl(value: string): string {
-  return saveServerBaseUrl(value).baseUrl;
+export function setServerBaseUrl(
+  value: string,
+  apiPassword: string | null = null,
+): { baseUrl: string; apiPassword: string | null } {
+  const saved = saveServerTarget(value, apiPassword);
+  return {
+    baseUrl: saved.baseUrl,
+    apiPassword: saved.apiPassword,
+  };
 }
 
 export function clearServerBaseUrl(): void {
@@ -377,15 +390,41 @@ export function normalizeServerBaseUrl(value: string): string {
   return parseServerBaseUrl(value);
 }
 
-export function getUnifiedEventsUrl(baseUrlOverride?: string): string {
-  return buildServerUrl("/api/unified/events", baseUrlOverride);
+export function getUnifiedEventsUrl(
+  baseUrlOverride?: string,
+  apiPasswordOverride?: string,
+): string {
+  const url = new URL(buildServerUrl("/api/unified/events", baseUrlOverride));
+  const apiPassword =
+    apiPasswordOverride === undefined
+      ? resolveServerApiPassword()
+      : normalizeServerApiPassword(apiPasswordOverride);
+  if (apiPassword !== null) {
+    url.searchParams.set("apiPassword", apiPassword);
+  }
+  return url.toString();
+}
+
+function withServerApiPassword(init?: RequestInit): RequestInit | undefined {
+  const apiPassword = resolveServerApiPassword();
+  if (apiPassword === null) {
+    return init;
+  }
+
+  const headers = new Headers(init?.headers);
+  headers.set("x-farfield-api-password", apiPassword);
+
+  return {
+    ...(init ?? {}),
+    headers,
+  };
 }
 
 async function requestJson(
   path: string,
   init?: RequestInit,
 ): Promise<{ response: Response; payload: JsonValue }> {
-  const response = await fetch(buildServerUrl(path), init);
+  const response = await fetch(buildServerUrl(path), withServerApiPassword(init));
   const payload = JsonValueSchema.parse(await response.json());
   return {
     response,

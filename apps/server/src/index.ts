@@ -3,7 +3,7 @@ import type { Socket } from "node:net";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import type { IpcFrame } from "@farfield/protocol";
 import {
@@ -38,6 +38,9 @@ const HISTORY_LIMIT = 2_000;
 const USER_AGENT = "farfield/0.2.2";
 const IPC_RECONNECT_DELAY_MS = 1_000;
 const SIDEBAR_PREVIEW_MAX_CHARS = 180;
+const API_PASSWORD_HEADER_NAME = "x-farfield-api-password";
+const API_PASSWORD_QUERY_PARAM = "apiPassword";
+const DEFAULT_API_PASSWORD = "zxczxc";
 
 const TRACE_DIR = path.resolve(process.cwd(), "traces");
 const DEFAULT_WORKSPACE = path.resolve(process.cwd());
@@ -140,6 +143,48 @@ function parseBoolean(value: string | null, fallback: boolean): boolean {
   return fallback;
 }
 
+function resolveConfiguredApiPassword(): string | null {
+  const configured = process.env["FARFIELD_API_PASSWORD"];
+  if (!configured) {
+    return DEFAULT_API_PASSWORD;
+  }
+  const trimmed = configured.trim();
+  if (trimmed.length === 0) {
+    return DEFAULT_API_PASSWORD;
+  }
+  return trimmed;
+}
+
+function normalizeApiPassword(value: string | null): string | null {
+  if (value === null) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  return trimmed;
+}
+
+function readHeaderValue(value: string | string[] | undefined): string | null {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (!value || value.length === 0) {
+    return null;
+  }
+  return value[0] ?? null;
+}
+
+function passwordsMatch(expected: string, provided: string): boolean {
+  const expectedBuffer = Buffer.from(expected, "utf8");
+  const providedBuffer = Buffer.from(provided, "utf8");
+  if (expectedBuffer.length !== providedBuffer.length) {
+    return false;
+  }
+  return timingSafeEqual(expectedBuffer, providedBuffer);
+}
+
 function jsonResponse(
   res: ServerResponse,
   statusCode: number,
@@ -147,7 +192,7 @@ function jsonResponse(
 ): void {
   const headers = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "content-type",
+    "Access-Control-Allow-Headers": "content-type, x-farfield-api-password",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   };
 
@@ -268,6 +313,7 @@ const threadIndex = new ThreadIndex();
 let activeTrace: ActiveTrace | null = null;
 const recentTraces: TraceSummary[] = [];
 let runtimeLastError: string | null = null;
+const configuredApiPassword = resolveConfiguredApiPassword();
 
 function recordTraceEvent(event: unknown): void {
   if (!activeTrace) {
@@ -478,11 +524,15 @@ function printStartupBanner(): void {
       underline: true,
     }),
     paint(`Agents: ${configuredAgentIds.join(", ")}`, "dim"),
+    paint(
+      `API password: ${configuredApiPassword ? "enabled" : "disabled"}`,
+      configuredApiPassword ? "yellow" : "dim",
+    ),
     "",
     paint("Remote access (recommended):", "yellow", { bold: true }),
     "1. Keep this server private. Do not expose it to the public internet.",
     "2. Put it behind a VPN, such as Tailscale.",
-    "3. In farfield.app, open Settings and set your server URL.",
+    `3. In farfield.app, open Settings and set your server URL${configuredApiPassword ? " and API password" : ""}.`,
     "",
     paint("Setup guide:", "cyan", { bold: true }),
     paint("https://github.com/achimala/farfield#readme", "blue", {
@@ -505,6 +555,25 @@ function parseUnifiedProviderId(
   return null;
 }
 
+function isApiRequestAuthorized(req: IncomingMessage, url: URL): boolean {
+  if (configuredApiPassword === null) {
+    return true;
+  }
+
+  const headerPassword = normalizeApiPassword(
+    readHeaderValue(req.headers[API_PASSWORD_HEADER_NAME]),
+  );
+  const queryPassword = normalizeApiPassword(
+    url.searchParams.get(API_PASSWORD_QUERY_PARAM),
+  );
+  const providedPassword = headerPassword ?? queryPassword;
+  if (providedPassword === null) {
+    return false;
+  }
+
+  return passwordsMatch(configuredApiPassword, providedPassword);
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     if (!req.url) {
@@ -520,6 +589,17 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${HOST}:${PORT}`);
     const pathname = url.pathname;
     const segments = pathname.split("/").filter(Boolean);
+
+    if (pathname.startsWith("/api/") && !isApiRequestAuthorized(req, url)) {
+      jsonResponse(res, 401, {
+        ok: false,
+        error: {
+          code: "unauthorized",
+          message: "API password required or invalid",
+        },
+      });
+      return;
+    }
 
     if (req.method === "GET" && pathname === "/api/health") {
       jsonResponse(res, 200, {

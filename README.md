@@ -99,7 +99,7 @@ bun run dev:remote                           # exposes frontend + backend on you
 bun run dev:remote -- --agents=opencode      # remote mode with OpenCode only
 ```
 
-> **Warning:** `dev:remote` exposes Farfield with no authentication. Only use on trusted networks.
+> **Warning:** `dev:remote` uses API password authentication by default (`zxczxc`). Change it via `FARFIELD_API_PASSWORD` before exposing your server.
 
 ## Production Mode (No Extra Proxy)
 
@@ -120,6 +120,12 @@ If you need a custom backend origin for API proxying:
 
 ```bash
 FARFIELD_API_ORIGIN=http://127.0.0.1:4311 bun run start
+```
+
+Set a custom API password for every API request (default is `zxczxc` if unset):
+
+```bash
+FARFIELD_API_PASSWORD=your-strong-password bun run start
 ```
 
 ## Deploying the frontend to Vercel
@@ -260,13 +266,15 @@ https://<machine>.<tailnet>.ts.net
 
 4. Click **Save**.
 
+If you did not set `FARFIELD_API_PASSWORD`, use the default **Server API password**: `zxczxc`.
+
 Farfield stores this in browser storage and uses it for API calls and live event stream.
 
 ### Notes
 
 - Do not use raw tailnet IPs with `https://` (for example `https://100.x.x.x:4311`) in the browser; this won't work.
 - If you use `tailscale serve --https=443`, do not include `:4311` in the URL you enter in Settings.
-- **Use automatic** in Settings clears the saved server URL and returns to built-in default behavior.
+- **Use automatic** in Settings clears both the saved server URL and API password.
 
 ## License
 

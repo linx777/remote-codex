@@ -9,6 +9,7 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 
 SERVER_LOG=${SERVER_LOG:-/tmp/farfield-remote-server.log}
 TUNNEL_LOG=${TUNNEL_LOG:-/tmp/farfield-remote-tunnel.log}
+API_PASSWORD=${FARFIELD_API_PASSWORD:-zxczxc}
 
 if ! command -v bun >/dev/null 2>&1; then
   echo "error: bun not found. Run 'source ~/.zshrc' or install Bun first." >&2
@@ -47,14 +48,23 @@ rm -f "$SERVER_LOG" "$TUNNEL_LOG"
 bun run server >"$SERVER_LOG" 2>&1 &
 server_pid=$!
 
+health_check() {
+  if [[ -n "$API_PASSWORD" ]]; then
+    curl -fsS -H "x-farfield-api-password: $API_PASSWORD" \
+      http://127.0.0.1:4311/api/health >/dev/null 2>&1
+    return
+  fi
+  curl -fsS http://127.0.0.1:4311/api/health >/dev/null 2>&1
+}
+
 for _ in {1..30}; do
-  if curl -fsS http://127.0.0.1:4311/api/health >/dev/null 2>&1; then
+  if health_check; then
     break
   fi
   sleep 1
 done
 
-if ! curl -fsS http://127.0.0.1:4311/api/health >/dev/null 2>&1; then
+if ! health_check; then
   echo "error: Farfield backend did not become healthy on http://127.0.0.1:4311" >&2
   tail -n 40 "$SERVER_LOG" >&2 || true
   exit 1

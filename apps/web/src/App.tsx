@@ -38,6 +38,7 @@ import {
   getPendingApprovalRequests,
   getPendingThreadRequests,
   getPendingUserInputRequests,
+  getSavedServerApiPassword,
   getSavedServerBaseUrl,
   getServerBaseUrl,
   getStreamEvents,
@@ -1148,6 +1149,10 @@ export function App(): React.JSX.Element {
     [],
   );
   const initialServerBaseUrl = useMemo(() => getServerBaseUrl(), []);
+  const initialServerApiPassword = useMemo(
+    () => getSavedServerApiPassword() ?? "",
+    [],
+  );
   const initialHasSavedServerBaseUrl = useMemo(
     () => getSavedServerBaseUrl() !== null,
     [],
@@ -1218,6 +1223,10 @@ export function App(): React.JSX.Element {
     useState<string>(initialServerBaseUrl);
   const [serverBaseUrlDraft, setServerBaseUrlDraft] =
     useState<string>(initialServerBaseUrl);
+  const [serverApiPassword, setServerApiPasswordState] =
+    useState<string>(initialServerApiPassword);
+  const [serverApiPasswordDraft, setServerApiPasswordDraft] =
+    useState<string>(initialServerApiPassword);
   const [hasSavedServerTarget, setHasSavedServerTarget] = useState<boolean>(
     initialHasSavedServerBaseUrl,
   );
@@ -1342,11 +1351,12 @@ export function App(): React.JSX.Element {
   );
   const selectedAgentLabel = selectedAgentDescriptor?.label ?? "Agent";
   const reversedHistory = useMemo(() => history.slice().reverse(), [history]);
-  const hasServerBaseUrlDraftChanges =
-    serverBaseUrlDraft.trim() !== serverBaseUrl;
+  const hasServerSettingsDraftChanges =
+    serverBaseUrlDraft.trim() !== serverBaseUrl ||
+    serverApiPasswordDraft !== serverApiPassword;
   const unifiedEventsUrl = useMemo(
-    () => getUnifiedEventsUrl(serverBaseUrl),
-    [serverBaseUrl],
+    () => getUnifiedEventsUrl(serverBaseUrl, serverApiPassword),
+    [serverApiPassword, serverBaseUrl],
   );
   const upsertSidebarThread = useCallback((threadSummary: Thread) => {
     setThreads((previousThreads) => {
@@ -2468,9 +2478,14 @@ export function App(): React.JSX.Element {
   const saveServerTarget = useCallback(async () => {
     try {
       setError("");
-      const normalizedBaseUrl = setServerBaseUrl(serverBaseUrlDraft);
-      setServerBaseUrlState(normalizedBaseUrl);
-      setServerBaseUrlDraft(normalizedBaseUrl);
+      const savedTarget = setServerBaseUrl(
+        serverBaseUrlDraft,
+        serverApiPasswordDraft,
+      );
+      setServerBaseUrlState(savedTarget.baseUrl);
+      setServerBaseUrlDraft(savedTarget.baseUrl);
+      setServerApiPasswordState(savedTarget.apiPassword ?? "");
+      setServerApiPasswordDraft(savedTarget.apiPassword ?? "");
       setHasSavedServerTarget(true);
       agentCacheRef.current = null;
       providerCatalogCacheRef.current.clear();
@@ -2478,7 +2493,7 @@ export function App(): React.JSX.Element {
     } catch (e) {
       setError(toErrorMessage(e));
     }
-  }, [refreshAll, serverBaseUrlDraft]);
+  }, [refreshAll, serverApiPasswordDraft, serverBaseUrlDraft]);
 
   const useDefaultServerTarget = useCallback(async () => {
     try {
@@ -2487,6 +2502,8 @@ export function App(): React.JSX.Element {
       const defaultBaseUrl = getDefaultServerBaseUrl();
       setServerBaseUrlState(defaultBaseUrl);
       setServerBaseUrlDraft(defaultBaseUrl);
+      setServerApiPasswordState("");
+      setServerApiPasswordDraft("");
       setHasSavedServerTarget(false);
       agentCacheRef.current = null;
       providerCatalogCacheRef.current.clear();
@@ -5064,6 +5081,26 @@ export function App(): React.JSX.Element {
                   />
                 </div>
 
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">Server API password</Label>
+                  <div className="text-xs text-muted-foreground">
+                    Sent with API requests. Empty defaults to zxczxc.
+                  </div>
+                  <Input
+                    type="password"
+                    value={serverApiPasswordDraft}
+                    onChange={(e) => setServerApiPasswordDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void saveServerTarget();
+                      }
+                    }}
+                    placeholder="Leave empty to use zxczxc"
+                    className="h-9 text-sm"
+                  />
+                </div>
+
                 <div className="flex gap-2">
                   <Button
                     type="button"
@@ -5074,7 +5111,7 @@ export function App(): React.JSX.Element {
                     className="h-8 text-xs"
                     disabled={
                       serverBaseUrlDraft.trim().length === 0 ||
-                      !hasServerBaseUrlDraftChanges
+                      !hasServerSettingsDraftChanges
                     }
                   >
                     Save
@@ -5093,6 +5130,9 @@ export function App(): React.JSX.Element {
 
                 <div className="text-xs text-muted-foreground break-all">
                   Active: {serverBaseUrl}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Password: {serverApiPassword.length > 0 ? "Configured" : "Not set"}
                 </div>
                 <div className="text-xs text-muted-foreground">
                   Mode:{" "}

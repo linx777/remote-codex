@@ -2,6 +2,8 @@ import { z } from "zod";
 
 const STORAGE_KEY = "farfield.server-target.v1";
 const DEFAULT_SERVER_PORT = 4311;
+const MAX_SERVER_API_PASSWORD_LENGTH = 512;
+const DEFAULT_SERVER_API_PASSWORD = "zxczxc";
 
 const ServerProtocolSchema = z.enum(["http:", "https:"]);
 
@@ -48,6 +50,15 @@ const ServerBaseUrlSchema = z
     return url.toString().replace(/\/$/, "");
   });
 
+const ServerApiPasswordSchema = z
+  .string()
+  .trim()
+  .min(1, "Server API password cannot be empty")
+  .max(
+    MAX_SERVER_API_PASSWORD_LENGTH,
+    `Server API password cannot exceed ${String(MAX_SERVER_API_PASSWORD_LENGTH)} characters`,
+  );
+
 const configuredServerBaseUrl = (() => {
   const configured = import.meta.env["VITE_FARFIELD_SERVER_URL"];
   if (typeof configured !== "string" || configured.trim().length === 0) {
@@ -56,12 +67,39 @@ const configuredServerBaseUrl = (() => {
   return ServerBaseUrlSchema.parse(configured);
 })();
 
-const StoredServerTargetSchema = z
+const StoredServerTargetV1Schema = z
   .object({
     version: z.literal(1),
     baseUrl: ServerBaseUrlSchema,
   })
   .strict();
+
+const StoredServerTargetV2Schema = z
+  .object({
+    version: z.literal(2),
+    baseUrl: ServerBaseUrlSchema,
+    apiPassword: z.union([ServerApiPasswordSchema, z.null()]),
+  })
+  .strict();
+
+const StoredServerTargetSchema = z
+  .union([StoredServerTargetV1Schema, StoredServerTargetV2Schema])
+  .transform((value) => {
+    if (value.version === 1) {
+      return {
+        version: 2 as const,
+        baseUrl: value.baseUrl,
+        apiPassword: DEFAULT_SERVER_API_PASSWORD,
+      };
+    }
+    if (value.apiPassword === null) {
+      return {
+        ...value,
+        apiPassword: DEFAULT_SERVER_API_PASSWORD,
+      };
+    }
+    return value;
+  });
 
 const StoredServerTargetTextSchema = z.string().transform((raw, ctx) => {
   try {
@@ -122,11 +160,31 @@ export function parseServerBaseUrl(value: string): string {
   return ServerBaseUrlSchema.parse(value);
 }
 
-export function saveServerBaseUrl(value: string): StoredServerTarget {
+export function parseServerApiPassword(value: string): string {
+  return ServerApiPasswordSchema.parse(value);
+}
+
+export function normalizeServerApiPassword(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return DEFAULT_SERVER_API_PASSWORD;
+  }
+  return parseServerApiPassword(trimmed);
+}
+
+export function saveServerTarget(
+  value: string,
+  apiPassword: string | null = null,
+): StoredServerTarget {
   const parsedBaseUrl = parseServerBaseUrl(value);
+  const parsedApiPassword =
+    apiPassword === null
+      ? DEFAULT_SERVER_API_PASSWORD
+      : normalizeServerApiPassword(apiPassword);
   const next: StoredServerTarget = {
-    version: 1,
+    version: 2,
     baseUrl: parsedBaseUrl,
+    apiPassword: parsedApiPassword,
   };
 
   if (typeof window !== "undefined") {
@@ -134,6 +192,11 @@ export function saveServerBaseUrl(value: string): StoredServerTarget {
   }
 
   return next;
+}
+
+export function saveServerBaseUrl(value: string): StoredServerTarget {
+  const existing = readStoredServerTarget();
+  return saveServerTarget(value, existing?.apiPassword ?? null);
 }
 
 export function clearStoredServerTarget(): void {
@@ -149,6 +212,11 @@ export function resolveServerBaseUrl(): string {
     return stored.baseUrl;
   }
   return getDefaultServerBaseUrl();
+}
+
+export function resolveServerApiPassword(): string | null {
+  const stored = readStoredServerTarget();
+  return stored?.apiPassword ?? DEFAULT_SERVER_API_PASSWORD;
 }
 
 export function buildServerUrl(path: string, baseUrlOverride?: string): string {
