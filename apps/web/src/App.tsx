@@ -1225,8 +1225,9 @@ export function App(): React.JSX.Element {
     useState<string>(initialServerBaseUrl);
   const [serverApiPassword, setServerApiPasswordState] =
     useState<string>(initialServerApiPassword);
-  const [serverApiPasswordDraft, setServerApiPasswordDraft] =
-    useState<string>(initialServerApiPassword);
+  const [serverApiPasswordDraft, setServerApiPasswordDraft] = useState<string>("");
+  const [isServerApiPasswordEdited, setIsServerApiPasswordEdited] =
+    useState(false);
   const [hasSavedServerTarget, setHasSavedServerTarget] = useState<boolean>(
     initialHasSavedServerBaseUrl,
   );
@@ -1353,9 +1354,9 @@ export function App(): React.JSX.Element {
   const reversedHistory = useMemo(() => history.slice().reverse(), [history]);
   const hasServerSettingsDraftChanges =
     serverBaseUrlDraft.trim() !== serverBaseUrl ||
-    serverApiPasswordDraft !== serverApiPassword;
+    isServerApiPasswordEdited;
   const unifiedEventsUrl = useMemo(
-    () => getUnifiedEventsUrl(serverBaseUrl, serverApiPassword),
+    () => getUnifiedEventsUrl(serverBaseUrl),
     [serverApiPassword, serverBaseUrl],
   );
   const upsertSidebarThread = useCallback((threadSummary: Thread) => {
@@ -2478,14 +2479,18 @@ export function App(): React.JSX.Element {
   const saveServerTarget = useCallback(async () => {
     try {
       setError("");
+      const nextApiPassword = isServerApiPasswordEdited
+        ? serverApiPasswordDraft
+        : serverApiPassword;
       const savedTarget = setServerBaseUrl(
         serverBaseUrlDraft,
-        serverApiPasswordDraft,
+        nextApiPassword,
       );
       setServerBaseUrlState(savedTarget.baseUrl);
       setServerBaseUrlDraft(savedTarget.baseUrl);
       setServerApiPasswordState(savedTarget.apiPassword ?? "");
-      setServerApiPasswordDraft(savedTarget.apiPassword ?? "");
+      setServerApiPasswordDraft("");
+      setIsServerApiPasswordEdited(false);
       setHasSavedServerTarget(true);
       agentCacheRef.current = null;
       providerCatalogCacheRef.current.clear();
@@ -2493,7 +2498,13 @@ export function App(): React.JSX.Element {
     } catch (e) {
       setError(toErrorMessage(e));
     }
-  }, [refreshAll, serverApiPasswordDraft, serverBaseUrlDraft]);
+  }, [
+    isServerApiPasswordEdited,
+    refreshAll,
+    serverApiPassword,
+    serverApiPasswordDraft,
+    serverBaseUrlDraft,
+  ]);
 
   const useDefaultServerTarget = useCallback(async () => {
     try {
@@ -2502,8 +2513,9 @@ export function App(): React.JSX.Element {
       const defaultBaseUrl = getDefaultServerBaseUrl();
       setServerBaseUrlState(defaultBaseUrl);
       setServerBaseUrlDraft(defaultBaseUrl);
-      setServerApiPasswordState("");
+      setServerApiPasswordState(getSavedServerApiPassword() ?? "");
       setServerApiPasswordDraft("");
+      setIsServerApiPasswordEdited(false);
       setHasSavedServerTarget(false);
       agentCacheRef.current = null;
       providerCatalogCacheRef.current.clear();
@@ -5083,20 +5095,19 @@ export function App(): React.JSX.Element {
 
                 <div className="space-y-1.5">
                   <Label className="text-sm font-medium">Server API password</Label>
-                  <div className="text-xs text-muted-foreground">
-                    Sent with API requests. Empty defaults to zxczxc.
-                  </div>
                   <Input
                     type="password"
                     value={serverApiPasswordDraft}
-                    onChange={(e) => setServerApiPasswordDraft(e.target.value)}
+                    onChange={(e) => {
+                      setServerApiPasswordDraft(e.target.value);
+                      setIsServerApiPasswordEdited(true);
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
                         void saveServerTarget();
                       }
                     }}
-                    placeholder="Leave empty to use zxczxc"
                     className="h-9 text-sm"
                   />
                 </div>
@@ -5130,9 +5141,6 @@ export function App(): React.JSX.Element {
 
                 <div className="text-xs text-muted-foreground break-all">
                   Active: {serverBaseUrl}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  Password: {serverApiPassword.length > 0 ? "Configured" : "Not set"}
                 </div>
                 <div className="text-xs text-muted-foreground">
                   Mode:{" "}
