@@ -8,13 +8,7 @@ remote-codex currently supports [Codex](https://openai.com/codex) and [OpenCode]
 
 Under the hood, remote-codex is a TypeScript-first monorepo with a static React frontend and a lightweight local adapter server. The browser talks directly to your remote-codex server over HTTP and Server-Sent Events, and the server translates that traffic into provider-specific calls for Codex and OpenCode.
 
-Built by [@anshuchimala](https://x.com/anshuchimala).
-
 This is an independent project and is not affiliated with, endorsed by, or sponsored by OpenAI or the OpenCode team.
-
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=000000)](https://buymeacoffee.com/achimalap)
-
-<img src="./screenshot.png" alt="remote-codex screenshot" width="500" />
 
 ## Architecture
 
