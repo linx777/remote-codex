@@ -1,12 +1,12 @@
-# Farfield
+# remote-codex
 
-Farfield is a remote control surface for local AI coding agents. It gives you a fast web UI for reading conversations, sending follow-up prompts, switching models, and monitoring live agent activity from another device while the real agent keeps running on your machine.
+remote-codex is a remote control surface for local AI coding agents. It gives you a fast web UI for reading conversations, sending follow-up prompts, switching models, and monitoring live agent activity from another device while the real agent keeps running on your machine.
 
 Website: [remote.ailin.uk](https://remote.ailin.uk/)
 
-Farfield currently supports [Codex](https://openai.com/codex) and [OpenCode](https://opencode.ai).
+remote-codex currently supports [Codex](https://openai.com/codex) and [OpenCode](https://opencode.ai).
 
-Under the hood, Farfield is a TypeScript-first monorepo with a static React frontend and a lightweight local adapter server. The browser talks directly to your Farfield server over HTTP and Server-Sent Events, and the server translates that traffic into provider-specific calls for Codex and OpenCode.
+Under the hood, remote-codex is a TypeScript-first monorepo with a static React frontend and a lightweight local adapter server. The browser talks directly to your remote-codex server over HTTP and Server-Sent Events, and the server translates that traffic into provider-specific calls for Codex and OpenCode.
 
 Built by [@anshuchimala](https://x.com/anshuchimala).
 
@@ -14,7 +14,7 @@ This is an independent project and is not affiliated with, endorsed by, or spons
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=000000)](https://buymeacoffee.com/achimalap)
 
-<img src="./screenshot.png" alt="Farfield screenshot" width="500" />
+<img src="./screenshot.png" alt="remote-codex screenshot" width="500" />
 
 ## Architecture
 
@@ -52,7 +52,7 @@ This is an independent project and is not affiliated with, endorsed by, or spons
 
 ## Quick start (recommended)
 
-Start the Farfield server:
+Start the remote-codex server:
 
 ```bash
 npx -y @farfield/server@latest
@@ -76,11 +76,11 @@ npx -y @farfield/server@latest -- --agents=all
 
 You can access the web app at [remote.ailin.uk](https://remote.ailin.uk/). Tap the bottom left status dot to pull up settings.
 
-You will need to make port 4311 remotely accessible via HTTPS and give the public URL to it to the Farfield frontend. None of this routes through an external server. The app runs inside entirely in your browser and tunnels directly to the Farfield server you started above, and all of it is open-source for you to audit yourself. However, if you are ultra paranoid, you can run and host the Farfield frontend too; read on!
+You will need to make port 4311 remotely accessible via HTTPS and give the public URL to it to the remote-codex frontend. None of this routes through an external server. The app runs entirely in your browser and tunnels directly to the remote-codex server you started above, and all of it is open-source for you to audit yourself. However, if you are ultra paranoid, you can run and host the remote-codex frontend too; read on!
 
 The securest way to open the port for remote access is by putting all devices involved in a private VPN. Tailscale is a free option that works.
 
-Doing this with Tailscale is as simple as installing Tailscale on your phone, computer, etc., and running this command on the device hosting the Farfield server:
+Doing this with Tailscale is as simple as installing Tailscale on your phone, computer, etc., and running this command on the device hosting the remote-codex server:
 ```bash
 tailscale serve --https=443 http://127.0.0.1:4311
 ```
@@ -106,11 +106,11 @@ bun run server -- --agents=codex,opencode
 bun run server -- --agents=all
 ```
 
-> **Warning:** This exposes the Farfield server on your network. Only use on trusted networks. See below for how to configure Tailscale as a VPN for secure remote access.
+> **Warning:** This exposes the remote-codex server on your network. Only use on trusted networks. See below for how to configure Tailscale as a VPN for secure remote access.
 
 ## Local development and self-hosted frontend
 
-Use this if you are working on Farfield itself, or if you want to run both frontend and backend locally.
+Use this if you are working on remote-codex itself, or if you want to run both frontend and backend locally.
 
 ```bash
 bun install
@@ -160,7 +160,7 @@ FARFIELD_API_PASSWORD=your-strong-password bun run start
 
 ## Deploying the frontend to Vercel
 
-You can deploy only the frontend and keep the Farfield backend running elsewhere.
+You can deploy only the frontend and keep the remote-codex backend running elsewhere.
 
 This repo now supports a build-time default backend URL for hosted frontends:
 
@@ -194,7 +194,7 @@ After deploy:
 
 ### Important networking note
 
-If your backend is only reachable over a private VPN such as Tailscale, the device opening the Vercel-hosted frontend must also be on that VPN. Vercel is only hosting the static frontend; your browser still talks directly to the Farfield backend.
+If your backend is only reachable over a private VPN such as Tailscale, the device opening the Vercel-hosted frontend must also be on that VPN. Vercel is only hosting the static frontend; your browser still talks directly to the remote-codex backend.
 
 ### React Compiler and production profiling
 
@@ -245,12 +245,12 @@ bun run --filter @farfield/web preview -- --host 127.0.0.1 --port 4313 --strictP
 This is the detailed setup for the recommended model:
 
 - Hosted frontend (`https://remote.ailin.uk/`)
-- Local Farfield server running on your machine
+- Local remote-codex server running on your machine
 - Secure VPN path using Tailscale
 
 You still need to run the server locally so it can talk to your coding agent.
 
-### 1) Start the Farfield server on your machine
+### 1) Start the remote-codex server on your machine
 
 ```bash
 HOST=0.0.0.0 PORT=4311 bun run --filter @farfield/server dev
@@ -298,7 +298,7 @@ https://<machine>.<tailnet>.ts.net
 
 If you did not set `FARFIELD_API_PASSWORD`, use the default **Server API password**: `zxczxc`.
 
-Farfield stores this in browser storage and uses it for API calls and live event stream.
+remote-codex stores this in browser storage and uses it for API calls and live event stream.
 
 ### Notes
 
