@@ -2,6 +2,8 @@
 
 Farfield is a remote control surface for local AI coding agents. It gives you a fast web UI for reading conversations, sending follow-up prompts, switching models, and monitoring live agent activity from another device while the real agent keeps running on your machine.
 
+Website: [farfield.app](https://farfield.app)
+
 Farfield currently supports [Codex](https://openai.com/codex) and [OpenCode](https://opencode.ai).
 
 Under the hood, Farfield is a TypeScript-first monorepo with a static React frontend and a lightweight local adapter server. The browser talks directly to your Farfield server over HTTP and Server-Sent Events, and the server translates that traffic into provider-specific calls for Codex and OpenCode.
