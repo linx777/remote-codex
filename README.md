@@ -1,8 +1,10 @@
 # Farfield
 
-Remote control for AI coding agents — read conversations, send messages, switch models, and monitor agent activity from a clean web UI.
+Farfield is a remote control surface for local AI coding agents. It gives you a fast web UI for reading conversations, sending follow-up prompts, switching models, and monitoring live agent activity from another device while the real agent keeps running on your machine.
 
-Supports [Codex](https://openai.com/codex) and [OpenCode](https://opencode.ai).
+Farfield currently supports [Codex](https://openai.com/codex) and [OpenCode](https://opencode.ai).
+
+Under the hood, Farfield is a TypeScript-first monorepo with a static React frontend and a lightweight local adapter server. The browser talks directly to your Farfield server over HTTP and Server-Sent Events, and the server translates that traffic into provider-specific calls for Codex and OpenCode.
 
 Built by [@anshuchimala](https://x.com/anshuchimala).
 
@@ -11,6 +13,32 @@ This is an independent project and is not affiliated with, endorsed by, or spons
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=000000)](https://buymeacoffee.com/achimalap)
 
 <img src="./screenshot.png" alt="Farfield screenshot" width="500" />
+
+## Architecture
+
+1. `@farfield/server` runs next to your local agent runtime and exposes a small HTTP API plus a live event stream on port `4311`.
+2. `@farfield/web` is a static frontend that can run locally or be hosted separately, and it connects straight from the browser to that server.
+3. Provider adapters normalize Codex IPC/CLI behavior and OpenCode SDK behavior into one shared UI surface.
+4. Shared protocol packages keep events, commands, and validation types aligned across the frontend and backend.
+
+## Tech stack
+
+- Monorepo and tooling: Bun workspaces, TypeScript 5.9, Node.js 20+, Vitest
+- Frontend (`apps/web`): React 19, Vite 7, Tailwind CSS 4, Radix UI primitives, Framer Motion, React Markdown, `react-syntax-highlighter`
+- Frontend platform features: Vite PWA plugin, Workbox-powered service worker support, build-time React Compiler toggle, optional production profiling builds
+- Backend (`apps/server`): TypeScript on Node.js, `tsx` for local development, `esbuild` for the published CLI bundle, `pino` logging, `zod` validation
+- Provider integrations: Codex desktop IPC/CLI integration and OpenCode support via `@opencode-ai/sdk`
+- Shared packages: `@farfield/unified-surface` for provider-agnostic models, `@farfield/protocol` for protocol types and generated bindings, `@farfield/api` and `@farfield/opencode-api` for provider-specific adapters
+- Deployment model: static frontend can be self-hosted or deployed to Vercel, while the local agent-facing server can be exposed securely over Tailscale or another HTTPS/VPN path
+
+## Repository layout
+
+- `apps/web`: browser UI, local dev server, production build, PWA setup
+- `apps/server`: local bridge server that exposes API routes, SSE updates, tracing, and provider adapters
+- `packages/unified-surface`: common command and event contracts used by the UI and server
+- `packages/codex-protocol`: Codex protocol schemas, generated types, and fixtures
+- `packages/codex-api`: Codex-specific translation layer
+- `packages/opencode-api`: OpenCode-specific translation layer
 
 ## Features
 
