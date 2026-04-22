@@ -1241,6 +1241,11 @@ export function App(): React.JSX.Element {
   const [mobileSidebarDragOffset, setMobileSidebarDragOffset] = useState<
     number | null
   >(null);
+  const [emptyStateCreateMenuOpen, setEmptyStateCreateMenuOpen] =
+    useState(false);
+  const [openProjectCreateMenuKey, setOpenProjectCreateMenuKey] = useState<
+    string | null
+  >(null);
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
   const [isChatAtBottom, setIsChatAtBottom] = useState(true);
   const [visibleChatItemLimit, setVisibleChatItemLimit] = useState(
@@ -3833,13 +3838,17 @@ export function App(): React.JSX.Element {
                     New {selectedAgentLabel} thread
                   </Button>
                 ) : (
-                  <DropdownMenu>
+                  <DropdownMenu
+                    open={emptyStateCreateMenuOpen}
+                    onOpenChange={setEmptyStateCreateMenuOpen}
+                  >
                     <DropdownMenuTrigger asChild>
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         className="rounded-full"
+                        onClick={() => setEmptyStateCreateMenuOpen(true)}
                         disabled={
                           isBusy ||
                           !availableAgentIds.some((agentId) =>
@@ -3867,6 +3876,7 @@ export function App(): React.JSX.Element {
                             ) {
                               return;
                             }
+                            setEmptyStateCreateMenuOpen(false);
                             const defaultProjectPath =
                               agentsById[agentId]?.projectDirectories[0] ?? ".";
                             void createNewThread(defaultProjectPath, agentId);
@@ -4054,7 +4064,12 @@ export function App(): React.JSX.Element {
                         <Plus size={14} />
                       </IconBtn>
                     ) : (
-                      <DropdownMenu>
+                      <DropdownMenu
+                        open={openProjectCreateMenuKey === group.key}
+                        onOpenChange={(open) => {
+                          setOpenProjectCreateMenuKey(open ? group.key : null);
+                        }}
+                      >
                         <DropdownMenuTrigger asChild>
                           <Button
                             type="button"
@@ -4071,6 +4086,7 @@ export function App(): React.JSX.Element {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted"
+                            onClick={() => setOpenProjectCreateMenuKey(group.key)}
                             title={
                               group.projectPath
                                 ? `New thread in ${group.label}`
@@ -4102,6 +4118,7 @@ export function App(): React.JSX.Element {
                                 ) {
                                   return;
                                 }
+                                setOpenProjectCreateMenuKey(null);
                                 void createNewThread(
                                   group.projectPath,
                                   agentId,

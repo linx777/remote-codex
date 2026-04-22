@@ -226,6 +226,48 @@ describe("codex-protocol schemas", () => {
     expect(parsed.params.change.type).toBe("snapshot");
   });
 
+  it("parses snapshot broadcast when error item has structured errorInfo", () => {
+    const parsed = parseThreadStreamStateChangedBroadcast({
+      type: "broadcast",
+      method: "thread-stream-state-changed",
+      sourceClientId: "client-123",
+      version: 4,
+      params: {
+        conversationId: "thread-123",
+        type: "thread-stream-state-changed",
+        version: 4,
+        change: {
+          type: "snapshot",
+          conversationState: {
+            id: "thread-123",
+            turns: [
+              {
+                status: "completed",
+                items: [
+                  {
+                    id: "err-2",
+                    type: "error",
+                    message: "response_stream_disconnected",
+                    willRetry: false,
+                    errorInfo: {
+                      response_stream_disconnected: {
+                        http_status_code: 502
+                      }
+                    },
+                    additionalDetails: null
+                  }
+                ]
+              }
+            ],
+            requests: []
+          }
+        }
+      }
+    });
+
+    expect(parsed.params.change.type).toBe("snapshot");
+  });
+
   it("parses snapshot broadcast when turn includes todo-list item", () => {
     const parsed = parseThreadStreamStateChangedBroadcast({
       type: "broadcast",

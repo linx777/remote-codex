@@ -261,6 +261,7 @@ let featureMatrixFixture: {
 };
 
 let projectDirectoriesFixture: Record<ProviderId, string[]>;
+let createThreadCalls: Array<{ provider: ProviderId; cwd?: string }>;
 
 let threadsFixture: {
   ok: true;
@@ -441,6 +442,7 @@ beforeEach(() => {
     codex: ["/tmp/project"],
     opencode: [],
   };
+  createThreadCalls = [];
 
   threadsFixture = {
     ok: true,
@@ -571,6 +573,7 @@ vi.stubGlobal(
             kind: string;
             provider: ProviderId;
             threadId?: string;
+            cwd?: string;
           })
         : { kind: "unknown", provider: "codex" as const };
 
@@ -623,6 +626,28 @@ vi.stubGlobal(
         });
       }
 
+      if (body.kind === "createThread") {
+        createThreadCalls.push({
+          provider: body.provider,
+          ...(typeof body.cwd === "string" ? { cwd: body.cwd } : {}),
+        });
+        return jsonResponse({
+          ok: true,
+          result: {
+            kind: "createThread",
+            threadId: `created-${createThreadCalls.length}`,
+            thread: buildConversationStateFixture(
+              `created-${createThreadCalls.length}`,
+              "gpt-5.3-codex",
+              {
+                provider: body.provider,
+                updatedAt: 1700000000 + createThreadCalls.length,
+              },
+            ),
+          },
+        });
+      }
+
       return jsonResponse({
         ok: true,
         result: {
@@ -655,6 +680,37 @@ describe("App", () => {
     render(<App />);
     expect((await screen.findAllByText("Farfield")).length).toBeGreaterThan(0);
     expect(await screen.findByText("No thread selected")).toBeTruthy();
+  });
+
+  it("creates a thread from the empty-state plus button when multiple agents are enabled", async () => {
+    featureMatrixFixture = {
+      ok: true,
+      features: {
+        codex: buildFeatureSet(codexCapabilities, {
+          enabled: true,
+          connected: true,
+        }),
+        opencode: buildFeatureSet(opencodeCapabilities, {
+          enabled: true,
+          connected: true,
+        }),
+      },
+    };
+    projectDirectoriesFixture = {
+      codex: ["/tmp/project"],
+      opencode: ["/tmp/project"],
+    };
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "New thread" }));
+    fireEvent.click(await screen.findByText("New Codex thread"));
+
+    await waitFor(() =>
+      expect(createThreadCalls).toEqual([
+        { provider: "codex", cwd: "/tmp/project" },
+      ]),
+    );
   });
 
   it("shows waiting indicators in the sidebar from thread summaries", async () => {
